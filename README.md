@@ -1,7 +1,9 @@
 # pmaports for the Samsung Galaxy Tab A7 10.4 2020 (gta4l, SM-T500/T505)
 
-postmarketOS packages for gta4l. Copy `device/testing/*` into your pmaports
-checkout (`pmbootstrap config aports` shows where it is), then:
+postmarketOS packages for gta4l, one folder per package (the same layout as
+[LinuxForGta4l/postmarketos-packages-gta4l](https://github.com/LinuxForGta4l/postmarketos-packages-gta4l)).
+Copy the folders into `device/testing/` of your pmaports checkout
+(`pmbootstrap config aports` shows where it is), then:
 
 ```sh
 pmbootstrap checksum linux-postmarketos-qcom-sm6115 device-samsung-gta4l hexagonrpcd-gta4l firmware-samsung-gta4l
