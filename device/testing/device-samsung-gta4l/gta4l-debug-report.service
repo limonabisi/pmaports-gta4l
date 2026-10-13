@@ -1,0 +1,11 @@
+[Unit]
+Description=Print a gta4l hardware report to the console
+DefaultDependencies=no
+After=sys-kernel-debug.mount systemd-remount-fs.service gta4l-firmware-import.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/gta4l-debug-report
+
+[Install]
+WantedBy=sysinit.target

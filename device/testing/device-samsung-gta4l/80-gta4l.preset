@@ -1,0 +1,14 @@
+# Services the Qualcomm modem processor needs before Wi-Fi can start
+enable rmtfs.service
+enable tqftpserv.service
+enable bluetooth.service
+# gta4l
+enable gta4l-firmware-import.service
+enable gta4l-debug-report.service
+enable gta4l-battery-count.service
+enable gta4l-jack-yenile.service
+enable gta4l-usb-ag.service
+# Sensors on the ADSP (accelerometer, light, compass)
+enable hexagonrpcd-adsp-rootpd.service
+enable hexagonrpcd-adsp-sensorspd.service
+disable hexagonrpcd-sdsp.service

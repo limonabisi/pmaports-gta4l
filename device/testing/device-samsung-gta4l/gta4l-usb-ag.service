@@ -1,0 +1,10 @@
+[Unit]
+Description=gta4l USB ag gadget kimligi
+After=local-fs.target systemd-udevd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/gta4l-usb-ag
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=gta4l: make sure PulseAudio picked up the sound card
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/gta4l-ses-kontrol
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Import this tablet's own Qualcomm firmware
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=systemd-udev-trigger.service sysinit.target
+ConditionPathExists=!/lib/firmware/updates/qcom/sm6115/Samsung/gta4l/.imported
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/gta4l-firmware-import
+
+[Install]
+WantedBy=sysinit.target

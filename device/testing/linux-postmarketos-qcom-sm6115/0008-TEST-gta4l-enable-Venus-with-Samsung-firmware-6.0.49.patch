@@ -1,0 +1,40 @@
+From 2785dc7d5475918595d3872e62a56209afc29a97 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 6 Oct 2026 20:57:40 +0300
+Subject: [PATCH 08/24] TEST: gta4l: enable Venus with Samsung firmware 6.0.49
+
+---
+ arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts | 6 ++++++
+ drivers/media/platform/qcom/venus/core.c          | 2 +-
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts b/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts
+index f511460af..2808771cc 100644
+--- a/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts
++++ b/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts
+@@ -642,6 +642,12 @@ &xo_board {
+ 	clock-frequency = <19200000>;
+ };
+ 
++&venus {
++	firmware-name = "qcom/sm6115/Samsung/gta4l/venus.mbn";
++
++	status = "okay";
++};
++
+ &soc {
+ 	/* Hack for passing bootloader checks */
+ 	spi@4a80000 {
+diff --git a/drivers/media/platform/qcom/venus/core.c b/drivers/media/platform/qcom/venus/core.c
+index 243e342b0..ed818e349 100644
+--- a/drivers/media/platform/qcom/venus/core.c
++++ b/drivers/media/platform/qcom/venus/core.c
+@@ -1135,7 +1135,7 @@ static const struct bw_tbl qcm2290_bw_table_enc[] = {
+ };
+ 
+ static const struct firmware_version min_fw = {
+-	.major = 6, .minor = 0, .rev = 55,
++	.major = 6, .minor = 0, .rev = 49,
+ };
+ 
+ static const struct venus_resources qcm2290_res = {

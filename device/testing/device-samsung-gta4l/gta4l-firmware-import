@@ -1,0 +1,45 @@
+#!/bin/sh
+# Copies the Samsung-signed firmware that belongs to THIS tablet from its own
+# firmware partition (read-only) to /lib/firmware/updates, which the kernel
+# searches before the packaged copies.
+DST=/lib/firmware/updates/qcom/sm6115/Samsung/gta4l
+LOG=/var/log/gta4l-firmware-import.log
+say() { echo "gta4l-fw: $*" | tee -a "$LOG" > /dev/kmsg 2>/dev/null || true; }
+
+[ -e "$DST/.imported" ] && exit 0
+
+say "partitions: $(grep -h PARTNAME= /sys/class/block/*/uevent | cut -d= -f2 | tr '\n' ' ')"
+
+mnt=/run/gta4l-fw
+mkdir -p "$mnt" "$DST"
+n=0
+for name in apnhlos modem; do
+	part=""
+	for u in /sys/class/block/*/uevent; do
+		if grep -qx "PARTNAME=$name" "$u"; then
+			part=/dev/$(basename "$(dirname "$u")")
+			break
+		fi
+	done
+	[ -n "$part" ] || { say "$name: no such partition"; continue; }
+	if ! mount -o ro "$part" "$mnt" 2>/dev/null; then
+		say "$name: cannot mount $part ($(blkid "$part" 2>/dev/null))"
+		continue
+	fi
+	src="$mnt/image"
+	[ -d "$src" ] || src="$mnt"
+	say "$name ($part): $(ls "$src" | grep -v '\.b[0-9][0-9]$' | tr '\n' ' ')"
+	for pat in adsp cdsp modem mba a610_zap venus wlanmdsp ipa_fws bdwlan; do
+		for f in "$src"/$pat*; do
+			[ -f "$f" ] || continue
+			cp "$f" "$DST/" && n=$((n + 1))
+		done
+		# Split images (.mdt + .bNN): the kernel is told to load NAME.mbn
+		if [ -f "$DST/$pat.mdt" ] && [ ! -f "$DST/$pat.mbn" ]; then
+			cp "$DST/$pat.mdt" "$DST/$pat.mbn"
+		fi
+	done
+	umount "$mnt"
+done
+say "copied $n files to $DST"
+touch "$DST/.imported"

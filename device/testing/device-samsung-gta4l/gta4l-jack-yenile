@@ -1,0 +1,36 @@
+#!/bin/sh
+# gta4l: jack degisince ses yolunu jack'e gore zorla ayarla, sonra PulseAudio sink/source'unu yeniden ac
+U="sudo -u user XDG_RUNTIME_DIR=/run/user/10000"
+A="amixer -c0 -q cset name"
+yol() {
+	j=$(amixer -c0 cget iface=CARD,name='Headphone Jack' 2>/dev/null | tail -n1)
+	case "$j" in
+	*values=on*)
+		$A='PRI_MI2S_RX Audio Mixer MultiMedia1' 0
+		$A='RX_CODEC_DMA_RX_0 Audio Mixer MultiMedia1' 1 ;;
+	*)
+		$A='RX_CODEC_DMA_RX_0 Audio Mixer MultiMedia1' 0
+		$A='PRI_MI2S_RX Audio Mixer MultiMedia1' 1 ;;
+	esac
+}
+yenile() {
+	for k in sinks sources; do
+		case $k in sinks) c=suspend-sink;; *) c=suspend-source;; esac
+		for n in $($U pactl list $k short | cut -f2 | grep alsa_ | grep -v monitor); do
+			$U pactl $c $n 1; sleep 0.5; $U pactl $c $n 0
+		done
+	done
+}
+last=""
+while sleep 1; do
+	j=$(amixer -c0 cget iface=CARD,name='Headphone Jack' 2>/dev/null | tail -n1)
+	if [ -n "$last" ] && [ "$j" != "$last" ]; then
+		# jack titreyip oturana kadar bekle
+		sleep 3
+		yol
+		yenile
+		last=$(amixer -c0 cget iface=CARD,name='Headphone Jack' 2>/dev/null | tail -n1)
+		continue
+	fi
+	last="$j"
+done

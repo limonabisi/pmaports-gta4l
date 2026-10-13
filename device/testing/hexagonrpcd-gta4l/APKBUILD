@@ -1,0 +1,32 @@
+# Maintainer: limonabisi
+# hexagonrpcd with one change gta4l's sensor firmware needs: it also asks for
+# sns_reg_version next to the sensor registry. Installed under its own name so
+# it does not replace the distribution's hexagonrpcd.
+pkgname=hexagonrpcd-gta4l
+pkgver=0.4.0_git20260915
+pkgrel=0
+_commit="da7a3742ab8d5273a281b70ee11f16fb2cb6a690"
+pkgdesc="hexagonrpcd patched for the Samsung Galaxy Tab A7 10.4 2020 sensors"
+url="https://github.com/linux-msm/hexagonrpc"
+arch="aarch64"
+license="GPL-3.0-or-later"
+makedepends="meson linux-headers"
+options="!check"
+source="
+	hexagonrpc-$_commit.tar.gz::https://github.com/linux-msm/hexagonrpc/archive/$_commit.tar.gz
+	0001-rpcd-serve-sns_reg_version-next-to-the-sensor-registry.patch
+	"
+builddir="$srcdir/hexagonrpc-$_commit"
+
+build() {
+	abuild-meson . output
+	meson compile -C output
+}
+
+package() {
+	install -Dm755 output/hexagonrpcd/hexagonrpcd \
+		"$pkgdir"/usr/bin/hexagonrpcd-gta4l
+}
+
+# Generate with: pmbootstrap checksum hexagonrpcd-gta4l
+sha512sums=""

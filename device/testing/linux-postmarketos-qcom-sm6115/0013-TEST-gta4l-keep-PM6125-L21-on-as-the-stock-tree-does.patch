@@ -1,0 +1,32 @@
+From a11bcc2a8e833be1ef726a9a51aeb6cd96a31c8f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 7 Oct 2026 22:35:52 +0300
+Subject: [PATCH 13/24] TEST: gta4l: keep PM6125 L21 on, as the stock tree does
+
+Stock marks L21 always-on and nothing in its device tree consumes it.
+Tried as the supply of the light/proximity sensor, which the ADSP does
+not find while the other sensors on the same bus work.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016AirPAcjr6JyfsKizshE8B
+---
+ arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts b/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts
+index 34c52bd1c..aa6c03a1f 100644
+--- a/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts
++++ b/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts
+@@ -441,6 +441,12 @@ pm6125_l20a: l20 {
+ 		pm6125_l21a: l21 {
+ 			regulator-min-microvolt = <2400000>;
+ 			regulator-max-microvolt = <3600000>;
++			/*
++			 * The stock tree keeps this one on with no consumer of
++			 * its own; tried as the supply of the light sensor.
++			 */
++			regulator-boot-on;
++			regulator-always-on;
+ 		};
+ 
+ 		pm6125_l22a: l22 {

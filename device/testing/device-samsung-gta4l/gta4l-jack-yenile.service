@@ -1,0 +1,10 @@
+[Unit]
+Description=gta4l kulaklik takilinca sesi yenile
+After=sound.target
+
+[Service]
+ExecStart=/usr/libexec/gta4l-jack-yenile
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

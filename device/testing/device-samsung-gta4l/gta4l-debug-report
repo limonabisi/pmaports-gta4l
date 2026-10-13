@@ -1,0 +1,203 @@
+#!/bin/sh
+# Boot-time setup for the tablet: speaker tuning file, sleep, swap, CPU cores.
+# It stays quiet unless /etc/gta4l-debug exists; with that file it also
+# prints hardware state to the kernel log (UART) every few seconds.
+DBG=
+[ -e /etc/gta4l-debug ] && DBG=1
+out() { [ -n "$DBG" ] && echo "gta4l-report: $*" > /dev/kmsg; return 0; }
+P=/sys/class/power_supply/qcom-qg-battery
+batt() { out "t=$(cut -d' ' -f1 /proc/uptime) batt $(cat $P/capacity)% $(($(cat $P/voltage_now) / 1000))mV $(($(cat $P/current_now) / 1000))mA $(cat $P/status) usbin=$(cat /sys/bus/iio/devices/iio:device*/in_voltage_usb_in_v_div_16_input 2>/dev/null)"; }
+
+# The speaker amplifiers need their tuning file, which Samsung keeps in the
+# vendor partition inside "super". Read it out once (nothing is written to
+# the eMMC).
+le32() {
+	v=$(dd if="$1" bs=1 skip="$2" count=4 2>/dev/null | od -An -tu4 2>/dev/null | tr -d ' \n')
+	[ -n "$v" ] || v=$(dd if="$1" bs=1 skip="$2" count=4 2>/dev/null | hexdump -v -e '1/4 "%u"' 2>/dev/null)
+	echo "${v:-0}"
+}
+vendorfw() {
+	F=$(ls /lib/firmware/*.fsm 2>/dev/null | tr '\n' ' ')
+	[ -n "$F" ] && { out "vendor: already imported: $F"; return; }
+	S=$(ls /dev/disk/by-partlabel/super 2>/dev/null)
+	[ -n "$S" ] || { out "vendor: no super partition"; return; }
+	H=12288
+	[ "$(le32 $S $H)" = 1095520304 ] || { out "vendor: bad metadata magic $(le32 $S $H)"; return; }
+	HS=$(le32 $S $((H + 8)))
+	PO=$(le32 $S $((H + 80))); PN=$(le32 $S $((H + 84))); PS=$(le32 $S $((H + 88)))
+	EO=$(le32 $S $((H + 92))); ES=$(le32 $S $((H + 100)))
+	T=$((H + HS))
+	i=0; FOUND=
+	while [ $i -lt "$PN" ]; do
+		P=$((T + PO + i * PS))
+		N=$(dd if=$S bs=1 skip=$P count=36 2>/dev/null | tr -d '\0')
+		FE=$(le32 $S $((P + 40))); NE=$(le32 $S $((P + 44)))
+		out "vendor: part $N extents=$NE"
+		case "$N" in vendor|vendor_a) [ "$NE" -ge 1 ] && FOUND="$FE $NE" ;; esac
+		i=$((i + 1))
+	done
+	[ -n "$FOUND" ] || { out "vendor: no vendor partition in super"; return; }
+	set -- $FOUND
+	[ "$2" = 1 ] || out "vendor: $2 extents, using the first only"
+	E=$((T + EO + $1 * ES))
+	NS=$(le32 $S $E); TS=$(le32 $S $((E + 12)))
+	out "vendor: start sector $TS, $NS sectors"
+	M=/tmp/gta4l-vendor; mkdir -p $M
+	L=$(losetup -r -f --show -o $((TS * 512)) --sizelimit $((NS * 512)) $S) || { out "vendor: losetup failed"; return; }
+	mount -o ro "$L" $M 2>/dev/null || mount -o ro,noload -t ext4 "$L" $M 2>/dev/null || mount -o ro -t erofs "$L" $M 2>/dev/null
+	if mountpoint -q $M; then
+		for f in $(find $M -name '*.fsm' 2>/dev/null); do
+			cp "$f" /lib/firmware/ && out "vendor: copied ${f#$M/} ($(wc -c < "$f") bytes)"
+		done
+		out "vendor: firmware dir: $(ls $M/firmware 2>/dev/null | grep -v -E '^(a6|adsp|cdsp|venus|wlan|ipa|modem)' | tr '\n' ' ' | cut -c1-600)"
+		out "vendor: audio files: $(ls $M/etc 2>/dev/null | grep -i -E 'mixer|audio|sound' | tr '\n' ' ' | cut -c1-500)"
+		umount $M
+	else
+		out "vendor: mount failed, type=$(blkid -o value -s TYPE "$L" 2>&1)"
+	fi
+	losetup -d "$L"
+}
+vendorfw &
+
+# Sleep: these wake the tablet a second after it falls asleep. The power and
+# volume keys keep their wake-up ability.
+nowake() {
+	sleep 20
+	for f in /sys/class/power_supply/*/power/wakeup \
+		 /sys/devices/platform/soc@0/4ac0000.geniqup/4a8c000.serial/power/wakeup \
+		 /sys/devices/platform/soc@0/*.remoteproc/power/wakeup \
+		 /sys/devices/platform/soc@0/4411000.thermal-sensor/power/wakeup; do
+		[ -e "$f" ] && echo disabled > "$f" 2>/dev/null
+	done
+	out "nowake: still enabled: $(find /sys/devices -path '*/power/wakeup' | while read -r f; do [ "$(cat "$f")" = enabled ] && basename "$(dirname "$(dirname "$f")")"; done | tr '\n' ' ')"
+}
+nowake &
+
+# Compressed swap in RAM. The stock service asks for a compressor this kernel
+# does not have, so set it up here with the one that is built in.
+zram() {
+	sleep 3
+	grep -q zram /proc/swaps && { out "zram: already on"; return; }
+	modprobe zram 2>/dev/null
+	Z=/sys/block/zram0
+	[ -d "$Z" ] || { out "zram: no device"; return; }
+	echo 1 > $Z/reset 2>/dev/null
+	echo lzo-rle > $Z/comp_algorithm 2>/dev/null
+	echo 2G > $Z/disksize && mkswap /dev/zram0 >/dev/null 2>&1 && swapon -p 100 /dev/zram0
+	echo 100 > /proc/sys/vm/swappiness
+	out "zram: $(cat $Z/comp_algorithm 2>&1) swaps=$(tail -n +2 /proc/swaps | tr -s ' \t' ' ' | tr '\n' '|') mem=$(grep -E 'MemTotal|MemAvailable' /proc/meminfo | tr -s ' ' | tr '\n' ' ')"
+}
+zram &
+# All eight cores on
+for c in 4 5 6 7; do
+	echo 1 > /sys/devices/system/cpu/cpu$c/online 2>/dev/null
+done
+# Speed follows the load: fast when needed, slow when idle
+for p in /sys/devices/system/cpu/cpufreq/policy*; do
+	for g in schedutil ondemand; do
+		grep -q -w "$g" "$p/scaling_available_governors" 2>/dev/null && echo "$g" > "$p/scaling_governor" 2>/dev/null && break
+	done
+done
+out "governor: $(cat /sys/devices/system/cpu/cpufreq/policy*/scaling_governor 2>&1 | tr '\n' ' ') freq: $(cat /sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq 2>&1 | tr '\n' ' ')"
+out "cpus online: $(cat /sys/devices/system/cpu/online)"
+
+# Everything below is diagnostics
+if [ -z "$DBG" ]; then
+	wait
+	exit 0
+fi
+batt
+
+# Charger registers of the PMI632 (read-only dump through regmap debugfs)
+for d in /sys/kernel/debug/regmap/*; do
+	case "$d" in *-02|*pmic@2*) ;; *) continue ;; esac
+	[ -r "$d/registers" ] || continue
+	out "regmap $d"
+	grep -E '^(10[0-9a-f]{2}|11[0-9a-f]{2}|13[0-9a-f]{2}|15[0-9a-f]{2}|16[0-9a-f]{2}): ' "$d/registers" | grep -v ': 00$' | tr '\n' ' ' | fold -w 900 | while read -r l; do out "reg $l"; done
+done
+out "regmap dirs: $(ls /sys/kernel/debug/regmap 2>&1 | tr '\n' ' ')"
+
+out "fw-import: $(tr '\n' '|' < /var/log/gta4l-firmware-import.log 2>/dev/null | cut -c1-900)"
+for r in /sys/class/remoteproc/*; do out "$(cat "$r/name") state=$(cat "$r/state")"; done
+out "gpu: $(dmesg | grep -i -E 'adreno|zap|gpu hw init' | tail -3 | tr '\n' '|')"
+out "input: $(grep -h Name= /proc/bus/input/devices | tr '\n' ' ')"
+
+# Raw touch coordinates, at most one line a second, to compare with where
+# the finger really is
+touchlog() {
+	sleep 12
+	for d in /sys/class/input/event*; do
+		grep -q -i novatek "$d/device/name" 2>/dev/null || continue
+		e=/dev/input/${d##*/}
+		out "touch: logging $e"
+		x=-1; y=-1; last=0
+		hexdump -v -e '12/2 "%04x " "\n"' "$e" | while read -r a b c dd f g h i ty co lo hi; do
+			[ "$ty" = 0003 ] || continue
+			case "$co" in 0035) x=$((0x$lo)) ;; 0036) y=$((0x$lo)) ;; *) continue ;; esac
+			now=$(cut -d. -f1 /proc/uptime)
+			[ "$now" -gt "$last" ] && [ "$x" -ge 0 ] && [ "$y" -ge 0 ] && { out "touch: raw x=$x y=$y (max 1199 x 1999)"; last=$now; }
+		done
+	done
+}
+touchlog &
+
+i=0
+while [ $i -lt 60 ]; do
+	sleep 5
+	batt
+	[ $((i % 6)) -eq 5 ] && out "ip: $(ip -4 -br addr show wlan0 2>&1)"
+	# Type-C state machine log, only the lines added since the last look
+	for t in /sys/kernel/debug/usb/tcpm-*; do
+		[ -r "$t" ] || continue
+		n=$(wc -l < "$t")
+		if [ "$n" != "${TCPM_N:-0}" ]; then
+			dn=$((n - ${TCPM_N:-0}))
+			if [ "$dn" -lt 1 ] || [ "$dn" -gt 14 ]; then dn=14; fi
+			tail -n "$dn" "$t" | cut -c1-150 | while read -r l; do out "tcpm: $l"; done
+			TCPM_N=$n
+		fi
+	done
+	if [ $((i % 6)) -eq 5 ]; then
+		for d in /sys/kernel/debug/regmap/*-02 /sys/kernel/debug/regmap/*pmic@2*; do
+			[ -r "$d/registers" ] || continue
+			out "chg: $(grep -E '^(100[6-9a-e]|130[6-9a-f]|1310|1340|1366|1370|160[6-9ab]): ' "$d/registers" | tr '\n' ' ')"
+			break
+		done
+	fi
+	i=$((i + 1))
+	if [ $i -eq 6 ]; then
+		out "bluetooth: $(bluetoothctl list 2>&1 | tr '\n' ' ')"
+		out "net: $(ip -br link 2>&1 | tr '\n' '|')"
+		out "ip: $(ip -4 -br addr 2>&1 | tr '\n' '|')"
+		out "gpu3: $(grep -i -E 'adreno|zap|gpu hw' /dev/kmsg 2>/dev/null | head -0)$(journalctl -k -b --no-pager 2>/dev/null | grep -i -E 'zap|gpu hw init|a610' | tail -3 | tr '\n' '|') renderer=$(cat /sys/kernel/debug/dri/*/name 2>/dev/null | tr '\n' ' ') gpu-busy=$(ls /sys/class/devfreq 2>/dev/null | tr '\n' ' ')"
+		export DISPLAY=:0 XAUTHORITY=/home/user/.Xauthority
+		out "xtools: $(command -v xrandr xinput 2>&1 | tr '\n' ' ')"
+		out "xrandr: $(xrandr --query 2>&1 | grep -E 'Screen|connected' | tr '\n' '|' | cut -c1-400)"
+		out "xinput: $(xinput list --name-only 2>&1 | tr '\n' '|' | cut -c1-300)"
+		out "xmatrix: $(xinput list-props 'Novatek NT36523 Touchscreen' 2>&1 | grep -i -E 'matrix|Calibration' | tr '\n' '|' | cut -c1-400)"
+		out "xfdisp: $(grep -i -E 'Rotation|Reflection|Resolution' /home/user/.config/xfce4/xfconf/xfce-perchannel-xml/displays.xml 2>&1 | tr -s ' \n' ' ' | cut -c1-400)"
+		out "udevts: $(udevadm info /dev/input/by-path/*spi* 2>/dev/null | grep -i -E 'CALIB|TOUCHSCREEN|ROTAT|WL_OUTPUT' | tr '\n' '|')"
+		V=/sys/firmware/devicetree/base/soc@0/video-codec@5a00000
+		out "venus-dt: status=$(tr -d '\0' < $V/status 2>&1) fw=$(tr -d '\0' < $V/firmware-name 2>&1)"
+		out "venus-mod: $(lsmod | grep -i -E 'venus|v4l2_mem2mem|videobuf2_dma' | tr -s ' ' | tr '\n' '|') file=$(modinfo -n venus-core 2>&1)"
+		out "venus-probe: $(modprobe venus-core 2>&1) drv=$(ls /sys/bus/platform/drivers/qcom-venus/ 2>&1 | tr '\n' ' ') deferred=$(grep -i -E '5a00000|video' /sys/kernel/debug/devices_deferred 2>&1 | tr '\n' '|')"
+		out "venus-fw: $(ls -la /lib/firmware/updates/qcom/sm6115/Samsung/gta4l/ 2>&1 | grep -i venus | tr -s ' ' | cut -d' ' -f5,9 | tr '\n' '|' | cut -c1-300)"
+		out "venus-log: $(dmesg | grep -i -E 'venus|5a00000' | grep -v gta4l | tail -8 | tr '\n' '|' | cut -c1-900)"
+		out "video: $(ls /dev/video* 2>&1 | tr '\n' ' ') $(cat /sys/class/video4linux/*/name 2>/dev/null | tr '\n' '|')"
+		out "gpu-x: $(grep -h -i -E 'glamor|renderer|llvmpipe|FD6|AIGLX' /var/log/Xorg.0.log 2>/dev/null | tail -4 | tr '\n' '|' | cut -c1-500)"
+		out "gpu-gl: $(glxinfo -B 2>&1 | grep -i -E 'renderer|not found' | tr '\n' '|' | cut -c1-300)"
+		out "sshd: $(systemctl is-active sshd) listen=$(ss -ltn 2>&1 | grep -c ':22 ') mac=$(cat /sys/class/net/wlan0/address 2>&1)"
+		out "nft-svc: $(systemctl is-active nftables 2>&1) files=$(ls /etc/nftables.d 2>&1 | tr '\n' ' ')"
+		nft list ruleset 2>&1 | grep -E 'chain|dport|iifname|policy' | tr -s ' \t' ' ' | head -30 | while read -r l; do out "nft: $l"; done
+		out "mem: $(grep -E 'MemAvailable|SwapTotal|SwapFree' /proc/meminfo | tr -s ' ' | tr '\n' ' ')"
+		out "sleep: state=$(cat /sys/power/state 2>&1) mem_sleep=$(cat /sys/power/mem_sleep 2>&1) wakeup=$(grep -l enabled /sys/bus/platform/devices/*/power/wakeup 2>/dev/null | wc -l)"
+		out "snd-cards: $(tr -s ' \n' ' ' < /proc/asound/cards 2>&1 | cut -c1-300) tools=$(command -v aplay amixer speaker-test pactl wpctl 2>&1 | tr '\n' ' ')"
+		out "snd-mod: $(lsmod | grep -E 'fs18xx|sm8250|soundwire|qcom_sdw' | tr -s ' ' | tr '\n' '|') i2c=$(ls /sys/bus/i2c/devices 2>&1 | tr '\n' ' ')"
+		out "snd-def: $(cat /sys/kernel/debug/devices_deferred 2>&1 | tr '\n' '|' | cut -c1-500)"
+		dmesg | grep -i -E 'fs18|fsm|foursemi|q6afe|lpass|lpi|sndcard|sound|asoc|snd_soc|amplifier' | grep -v gta4l-report | tail -40 | cut -c1-260 | while read -r l; do out "snd: $l"; done
+		iw reg set TR 2>/dev/null
+		out "wifi-scan: nets=$(nmcli -t -f SSID,CHAN dev wifi list --rescan yes 2>&1 | wc -l) sample=$(nmcli -t -f SSID,CHAN,SIGNAL dev wifi list 2>&1 | head -6 | tr '\n' '|' | cut -c1-300) reg=$(iw reg get 2>&1 | grep -m2 country | tr '\n' ' ') iw=$(command -v iw)"
+		out "lightdm: $(systemctl is-active lightdm) sessions: $(loginctl list-sessions --no-legend 2>&1 | tr '\n' '|')"
+		out "gpu2: $(dmesg | grep -i -E 'adreno|zap|gpu hw init' | tail -3 | tr '\n' '|')"
+	fi
+done

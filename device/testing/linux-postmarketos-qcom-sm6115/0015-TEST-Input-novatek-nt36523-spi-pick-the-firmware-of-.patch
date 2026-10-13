@@ -1,0 +1,67 @@
+From f16323186a8c9d4ae4550e8407a87611e25af74c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 7 Oct 2026 23:24:35 +0300
+Subject: [PATCH 15/24] TEST: Input: novatek-nt36523-spi: pick the firmware of
+ the fitted panel
+
+The vendor ships one touch firmware per panel variant. Take the variant
+from the panel the bootloader names on the command line when the
+configured file follows the vendor's naming.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016AirPAcjr6JyfsKizshE8B
+---
+ .../input/touchscreen/novatek-nt36523-spi.c   | 33 +++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/drivers/input/touchscreen/novatek-nt36523-spi.c b/drivers/input/touchscreen/novatek-nt36523-spi.c
+index a3b77e4b2..2e6de35f5 100644
+--- a/drivers/input/touchscreen/novatek-nt36523-spi.c
++++ b/drivers/input/touchscreen/novatek-nt36523-spi.c
+@@ -1029,6 +1029,38 @@ static void nvt_cleanup(void *data)
+ 	nvt_fw_release(ts);
+ }
+ 
++/*
++ * Tablets built with different panels need different touch firmware, and the
++ * vendor names the files after the panel. Where the bootloader names the
++ * fitted panel on the command line (msm_drm.dsi_display0=...nt36523_<panel>_video)
++ * and the configured file follows that naming, load the file of that panel.
++ */
++static const char *nvt_fw_name_for_panel(struct device *dev, const char *name)
++{
++	static const char key[] = "mdss_dsi_nt36523_";
++	static const char prefix[] = "novatek_ts_fw_";
++	const char *args, *s, *e, *fw;
++
++	if (!name || strncmp(name, prefix, sizeof(prefix) - 1))
++		return name;
++
++	if (!of_chosen || of_property_read_string(of_chosen, "bootargs", &args))
++		return name;
++
++	s = strstr(args, key);
++	if (!s)
++		return name;
++
++	s += sizeof(key) - 1;
++	e = strstr(s, "_video");
++	if (!e || e == s || e - s > 32 || memchr(s, ' ', e - s))
++		return name;
++
++	fw = devm_kasprintf(dev, GFP_KERNEL, "%s%.*s.bin", prefix, (int)(e - s), s);
++
++	return fw ?: name;
++}
++
+ static int nvt_probe(struct spi_device *spi)
+ {
+ 	struct device *dev = &spi->dev;
+@@ -1068,6 +1100,7 @@ static int nvt_probe(struct spi_device *spi)
+ 
+ 	ts->fw_name = ts->chip->default_fw_name;
+ 	device_property_read_string(dev, "firmware-name", &ts->fw_name);
++	ts->fw_name = nvt_fw_name_for_panel(dev, ts->fw_name);
+ 
+ 	input = devm_input_allocate_device(dev);
+ 	if (!input)

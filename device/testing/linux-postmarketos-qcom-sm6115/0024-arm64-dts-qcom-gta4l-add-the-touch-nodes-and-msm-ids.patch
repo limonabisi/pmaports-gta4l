@@ -1,0 +1,56 @@
+From 19bdfb4720c5d93ae083487e256e40ade895147e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 13 Oct 2026 21:05:28 +0300
+Subject: [PATCH 24/24] arm64: dts: qcom: gta4l: add the touch nodes and
+ msm-ids LinuxLoader expects
+
+Samsung's LinuxLoader looks up /soc/spi@4a80000/{himax_ts,novatek,
+focaltech}@0 while applying its overlay and drops to Download Mode
+when they are missing. Add disabled stubs for them, and list SM4250
+(0x1a1) next to SM6115 (0x1bc) as the stock Bengal base DTB does, so
+every hardware revision picks this DTB.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016AirPAcjr6JyfsKizshE8B
+---
+ .../boot/dts/qcom/sm6115-samsung-gta4l.dts      | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts b/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts
+index 154904a67..351104433 100644
+--- a/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts
++++ b/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts
+@@ -22,7 +22,8 @@
+ / {
+ 	model = "Samsung Galaxy Tab A7 10.4 (2020)";
+ 	compatible = "samsung,gta4l", "qcom,sm6115";
+-	qcom,msm-id = <0x1bc 0x10000>;
++	/* Same ids as the stock Bengal base DTB: SM4250 (0x1a1) and SM6115 (0x1bc) */
++	qcom,msm-id = <0x1a1 0x10000>, <0x1bc 0x10000>;
+ 	#address-cells = <0x02>;
+ 	#size-cells = <0x02>;
+ 	qcom,board-id = <0x1000b 0x00>;
+@@ -863,10 +864,22 @@ spi@4a80000 {
+ 		reg = <0x0 0x04a80000 0x0 0x4000>;
+ 		status = "disabled";
+ 
+-		/* The bootloader of Novatek touch tablets looks for this node */
++		/*
++		 * LinuxLoader looks up the node of the fitted panel's touch
++		 * vendor and stays in Download Mode if it is missing, so all
++		 * three stock candidates must exist.
++		 */
++		himax_ts@0 {
++			status = "disabled";
++		};
++
+ 		novatek@0 {
+ 			status = "disabled";
+ 		};
++
++		focaltech@0 {
++			status = "disabled";
++		};
+ 	};
+ };
+ 

@@ -1,0 +1,6657 @@
+From a5f8c1f4da91a2b5b68219bcf83407a9205776e9 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 7 Oct 2026 07:21:33 +0300
+Subject: [PATCH 09/24] TEST: gta4l: FourSemi FS18xx speaker amplifiers and
+ sound card
+
+---
+ .../boot/dts/qcom/sm6115-samsung-gta4l.dts    |  102 +
+ sound/soc/codecs/Kconfig                      |    8 +
+ sound/soc/codecs/Makefile                     |    1 +
+ sound/soc/codecs/foursemi/Makefile            |    6 +
+ sound/soc/codecs/foursemi/fs1801.c            |  524 ++++
+ sound/soc/codecs/foursemi/fs1801_reg_bf.h     |  414 +++
+ sound/soc/codecs/foursemi/fsm-dev.h           |  663 ++++
+ sound/soc/codecs/foursemi/fsm_codec.c         |  598 ++++
+ sound/soc/codecs/foursemi/fsm_core.c          | 2789 +++++++++++++++++
+ sound/soc/codecs/foursemi/fsm_firmware.c      |  135 +
+ sound/soc/codecs/foursemi/fsm_i2c.c           |  697 ++++
+ sound/soc/codecs/foursemi/fsm_list.h          |  144 +
+ sound/soc/codecs/foursemi/fsm_public.h        |  211 ++
+ sound/soc/codecs/foursemi/fsm_reg_bf.h        |  218 ++
+ 14 files changed, 6510 insertions(+)
+ create mode 100644 sound/soc/codecs/foursemi/Makefile
+ create mode 100644 sound/soc/codecs/foursemi/fs1801.c
+ create mode 100644 sound/soc/codecs/foursemi/fs1801_reg_bf.h
+ create mode 100644 sound/soc/codecs/foursemi/fsm-dev.h
+ create mode 100644 sound/soc/codecs/foursemi/fsm_codec.c
+ create mode 100644 sound/soc/codecs/foursemi/fsm_core.c
+ create mode 100644 sound/soc/codecs/foursemi/fsm_firmware.c
+ create mode 100644 sound/soc/codecs/foursemi/fsm_i2c.c
+ create mode 100644 sound/soc/codecs/foursemi/fsm_list.h
+ create mode 100644 sound/soc/codecs/foursemi/fsm_public.h
+ create mode 100644 sound/soc/codecs/foursemi/fsm_reg_bf.h
+
+diff --git a/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts b/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts
+index 2808771cc..c81eef4c3 100644
+--- a/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts
++++ b/arch/arm64/boot/dts/qcom/sm6115-samsung-gta4l.dts
+@@ -8,6 +8,8 @@
+ #include "sm6115.dtsi"
+ #include "pm6125.dtsi"
+ #include "pmi632.dtsi"
++#include <dt-bindings/sound/qcom,q6afe.h>
++#include <dt-bindings/sound/qcom,q6asm.h>
+ #include <dt-bindings/usb/pd.h>
+ 
+ /delete-node/ &cdsp_sec_mem;
+@@ -147,6 +149,37 @@ sec_debug_mem: memory@71400000 {
+ 			no-map;
+ 		};
+ 	};
++
++	sound {
++		compatible = "qcom,qrb4210-rb2-sndcard";
++		pinctrl-0 = <&lpi_i2s1_active>;
++		pinctrl-names = "default";
++		model = "Samsung-Galaxy-Tab-A7";
++
++		mm1-dai-link {
++			link-name = "MultiMedia1";
++
++			cpu {
++				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA1>;
++			};
++		};
++
++		speaker-dai-link {
++			link-name = "Speaker Playback";
++
++			cpu {
++				sound-dai = <&q6afedai PRIMARY_MI2S_RX>;
++			};
++
++			platform {
++				sound-dai = <&q6routing>;
++			};
++
++			codec {
++				sound-dai = <&speaker_amp>;
++			};
++		};
++	};
+ };
+ 
+ &gpi_dma0 {
+@@ -642,6 +675,75 @@ &xo_board {
+ 	clock-frequency = <19200000>;
+ };
+ 
++/* Four FourSemi FS18xx amplifiers share the primary MI2S data line */
++&i2c1 {
++	clock-frequency = <400000>;
++
++	status = "okay";
++
++	speaker_amp: amplifier@36 {
++		compatible = "foursemi,fs18xx";
++		reg = <0x36>;
++		fsm,position = "LBTM";
++		#sound-dai-cells = <0>;
++	};
++
++	amplifier@35 {
++		compatible = "foursemi,fs18xx";
++		reg = <0x35>;
++		fsm,position = "LTOP";
++	};
++
++	amplifier@34 {
++		compatible = "foursemi,fs18xx";
++		reg = <0x34>;
++		fsm,position = "RTOP";
++	};
++
++	amplifier@37 {
++		compatible = "foursemi,fs18xx";
++		reg = <0x37>;
++		fsm,position = "RBTM";
++	};
++};
++
++&lpass_tlmm {
++	/* The vendor firmware wants the core vote held before the audio one */
++	clocks = <&q6afecc LPASS_HW_MACRO_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
++		 <&q6afecc LPASS_HW_DCODEC_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
++	clock-names = "core", "audio";
++
++	lpi_i2s1_active: lpi-i2s1-active-state {
++		sck-pins {
++			pins = "gpio6";
++			function = "i2s1_clk";
++			bias-disable;
++			drive-strength = <8>;
++		};
++
++		ws-pins {
++			pins = "gpio7";
++			function = "i2s1_ws";
++			bias-disable;
++			drive-strength = <8>;
++		};
++
++		data-pins {
++			pins = "gpio8";
++			function = "i2s1_data";
++			bias-disable;
++			drive-strength = <8>;
++		};
++	};
++};
++
++&q6afedai {
++	dai@16 {
++		reg = <PRIMARY_MI2S_RX>;
++		qcom,sd-lines = <0>;
++	};
++};
++
+ &venus {
+ 	firmware-name = "qcom/sm6115/Samsung/gta4l/venus.mbn";
+ 
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index f9a47e262..2abcfd18c 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -1339,6 +1339,14 @@ config SND_SOC_FS_AMP_LIB
+ 	select CRC16
+ 	tristate
+ 
++config SND_SOC_FS18XX
++	tristate "FourSemi FS18xx smart amplifiers (vendor driver)"
++	depends on I2C
++	help
++	  Vendor driver for groups of FourSemi FS1894/FS1818 class-D
++	  amplifiers that share one I2S stream, as found on the Samsung
++	  Galaxy Tab A7. Needs the fs18xx.fsm tuning file of the device.
++
+ config SND_SOC_FS210X
+ 	tristate 'FourSemi FS2104/5S digital audio amplifier'
+ 	depends on I2C
+diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
+index 3d122ace7..e47fd3c79 100644
+--- a/sound/soc/codecs/Makefile
++++ b/sound/soc/codecs/Makefile
+@@ -588,6 +588,7 @@ obj-$(CONFIG_SND_SOC_ES9356)    += snd-soc-es9356.o
+ obj-$(CONFIG_SND_SOC_FRAMER)	+= snd-soc-framer.o
+ obj-$(CONFIG_SND_SOC_FS_AMP_LIB)+= snd-soc-fs-amp-lib.o
+ obj-$(CONFIG_SND_SOC_FS210X)	+= snd-soc-fs210x.o
++obj-$(CONFIG_SND_SOC_FS18XX)	+= foursemi/
+ obj-$(CONFIG_SND_SOC_GTM601)    += snd-soc-gtm601.o
+ obj-$(CONFIG_SND_SOC_HDAC_HDMI) += snd-soc-hdac-hdmi.o
+ obj-$(CONFIG_SND_SOC_HDAC_HDA) += snd-soc-hdac-hda.o
+diff --git a/sound/soc/codecs/foursemi/Makefile b/sound/soc/codecs/foursemi/Makefile
+new file mode 100644
+index 000000000..11329961b
+--- /dev/null
++++ b/sound/soc/codecs/foursemi/Makefile
+@@ -0,0 +1,6 @@
++# SPDX-License-Identifier: GPL-2.0
++snd-soc-fs18xx-y := fsm_core.o fs1801.o fsm_i2c.o
++obj-$(CONFIG_SND_SOC_FS18XX) += snd-soc-fs18xx.o
++ccflags-y += -DCONFIG_FSM_CODEC -DCONFIG_FSM_FIRMWARE -DCONFIG_FSM_I2C \
++	     -DCONFIG_FSM_STEREO -DCONFIG_FSM_FS1801
++ccflags-y += -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-declaration -Wno-unused-function
+diff --git a/sound/soc/codecs/foursemi/fs1801.c b/sound/soc/codecs/foursemi/fs1801.c
+new file mode 100644
+index 000000000..54e2d475b
+--- /dev/null
++++ b/sound/soc/codecs/foursemi/fs1801.c
+@@ -0,0 +1,524 @@
++/**
++ * Copyright (C) Fourier Semiconductor Inc. 2016-2020. All rights reserved.
++ * 2019-01-29 File created.
++ */
++
++#if defined(CONFIG_FSM_FS1801)
++#include "fsm_public.h"
++#include "fs1801_reg_bf.h"
++
++#define FS1801_PRESET_EQ_LEN  (0x0069)
++//bug 537023, baoshulin@wingtech.com, 20200316,  update fs18xx tuning re calib parameters
++#define FS1801_RS2RL_RATIO    (2300)
++#define FS1801_OTP_COUNT_MAX  (15)
++#define FS1801_EXCER_RAM_ADDR (0xD2)
++
++const static fsm_pll_config_t g_fs1801_pll_tbl[] = {
++	/* bclk,    0xC1,   0xC2,   0xC3 */
++	{  256000, 0x01A0, 0x0180, 0x0001 }, //  8000*16*2
++	{  512000, 0x01A0, 0x0180, 0x0002 }, // 16000*16*2 &  8000*32*2
++	{ 1024000, 0x0260, 0x0120, 0x0003 }, //            & 16000*32*2
++	{ 1024032, 0x0260, 0x0120, 0x0003 }, // 32000*16*2+32
++	{ 1411200, 0x01A0, 0x0100, 0x0004 }, // 44100*16*2
++	{ 1536000, 0x0260, 0x0100, 0x0004 }, // 48000*16*2
++	{ 2048032, 0x0260, 0x0120, 0x0006 }, //            & 32000*32*2+32
++	{ 2822400, 0x01A0, 0x0100, 0x0008 }, //            & 44100*32*2
++	{ 3072000, 0x0260, 0x0100, 0x0008 }, //            & 48000*32*2
++};
++
++const static struct fsm_bpcoef g_fs1801_bpcoef_table[] = {
++	{  200, { 0x00181B7B, 0x001801DA, 0xffe7e485, 0x0007C629, 0xFFE8349E} },
++	{  250, { 0x001817ED, 0x001801DA, 0xffe7e813, 0x0007CEEF, 0xFFE82DB5} },
++	{  300, { 0x001815DA, 0x001801DA, 0xffe7edda, 0x0007D06F, 0xFFE829D8} },
++	{  350, { 0x0018168A, 0x001801DA, 0xffe7e96a, 0x0007C908, 0xFFE82F78} },
++	{  400, { 0x00181489, 0x001801DA, 0xffe7eb77, 0x0007CBF4, 0xFFE82B7D} },
++	{  450, { 0x00181225, 0x001801DA, 0xffe7eddb, 0x0007C804, 0xFFE82625} },
++	{  500, { 0x001817EE, 0x001801DA, 0xffe7e816, 0x0007C3FC, 0xFFE82DB3} },
++	{  550, { 0x0018152A, 0x001801DA, 0xffe7eaca, 0x0007C0D8, 0xFFE8283B} },
++	{  600, { 0x00181226, 0x001801DA, 0xffe7edde, 0x0007BF3F, 0xFFE82620} },
++	{  650, { 0x00181479, 0x001801DA, 0xffe7eb87, 0x0007B6E7, 0xFFE82A92} },
++	{  700, { 0x0018156D, 0x001801DA, 0xffe7ea93, 0x0007B585, 0xFFE828B5} },
++	{  750, { 0x00181223, 0x001801DA, 0xffe7eddd, 0x0007B111, 0xFFE8262E} },
++	{  800, { 0x00181491, 0x001801DA, 0xffe7eb6f, 0x0007A919, 0xFFE82B42} },
++	{  850, { 0x0018154B, 0x001801DA, 0xffe7eab5, 0x0007A5AC, 0xFFE828FE} },
++	{  900, { 0x0018122C, 0x001801DA, 0xffe7edd0, 0x00079E4B, 0xFFE82637} },
++	{  950, { 0x001814D5, 0x001801DA, 0xffe7eb2b, 0x00079728, 0xFFE82BC5} },
++	{ 1000, { 0x001815AF, 0x001801DA, 0xffe7ea51, 0x00079082, 0xFFE82936} },
++	{ 1050, { 0x00181228, 0x001801DA, 0xffe7edd4, 0x00078AE0, 0xFFE8263F} },
++	{ 1100, { 0x00181538, 0x001801DA, 0xffe7eac4, 0x00078039, 0xFFE8281F} },
++	{ 1150, { 0x00181585, 0x001801DA, 0xffe7ea7b, 0x00077AC8, 0xFFE8291A} },
++	{ 1200, { 0x00181237, 0x001801DA, 0xffe7edc9, 0x0007721D, 0xFFE82601} },
++	{ 1250, { 0x00181564, 0x001801DA, 0xffe7ea98, 0x0007687F, 0xFFE828A4} },
++	{ 1300, { 0x00181596, 0x001801DA, 0xffe7ea6e, 0x00076073, 0xFFE82940} },
++	{ 1350, { 0x0018123D, 0x001801DA, 0xffe7edc3, 0x000758E1, 0xFFE8260A} },
++	{ 1400, { 0x0018157B, 0x001801DA, 0xffe7ea85, 0x00074F9B, 0xFFE82899} },
++	{ 1450, { 0x001815E6, 0x001801DA, 0xffe7ea1e, 0x000744F8, 0xFFE829A3} },
++	{ 1500, { 0x0018123B, 0x001801DA, 0xffe7edc5, 0x00073A42, 0xFFE82619} },
++	{ 1550, { 0x0018155D, 0x001801DA, 0xffe7eaa3, 0x00072E67, 0xFFE828CA} },
++	{ 1600, { 0x001815F7, 0x001801DA, 0xffe7ea09, 0x00072459, 0xFFE82981} },
++	{ 1650, { 0x00181200, 0x001801DA, 0xffe7edfc, 0x00071B3B, 0xFFE8266C} },
++	{ 1700, { 0x001815AB, 0x001801DA, 0xffe7ea55, 0x00070FFA, 0xFFE82939} },
++	{ 1750, { 0x001815C4, 0x001801DA, 0xffe7ea38, 0x00070315, 0xFFE829E4} },
++	{ 1800, { 0x00181209, 0x001801DA, 0xffe7edf7, 0x0006F6C3, 0xFFE8267D} },
++	{ 1850, { 0x00181586, 0x001801DA, 0xffe7ea7e, 0x0006E8B4, 0xFFE82960} },
++	{ 1900, { 0x001815CA, 0x001801DA, 0xffe7ea2a, 0x0006DCD0, 0xFFE829F8} },
++	{ 1950, { 0x00181210, 0x001801DA, 0xffe7edec, 0x0006D19E, 0xFFE8264C} },
++	{ 2000, { 0x00181593, 0x001801DA, 0xffe7ea6d, 0x0006C076, 0xFFE82949} },
++};
++
++static int fs1801_i2c_reset(fsm_dev_t *fsm_dev)
++{
++	uint16_t val;
++	int ret;
++	int i;
++
++	fsm_dev->acc_count = 0;
++	for (i = 0; i < FSM_I2C_RETRY; i++) {
++		fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), 0x0002);
++		fsm_reg_read(fsm_dev, REG(FSM_SYSCTRL), NULL); // dummy read
++		fsm_delay_ms(15); // 15ms
++		ret = fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), 0x0001);
++		 // check init finish flag
++		ret |= fsm_reg_multiread(fsm_dev, REG(FSM_CHIPINI), &val);
++		if ((val == 0x0003) || (val == 0x0300)) {
++			break;
++		}
++	}
++	if (i == FSM_I2C_RETRY) {
++		pr_addr(err, "retry timeout");
++		ret = -ETIMEDOUT;
++	}
++
++	return ret;
++}
++
++static int fs1801_config_pll(fsm_dev_t *fsm_dev, bool on)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	int idx;
++	int ret;
++
++	if (!fsm_dev || !cfg) {
++		return -EINVAL;
++	}
++	// config pll need disable pll firstly
++	ret = fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL4), 0);
++	fsm_delay_ms(1);
++	if (!on) {
++		// disable pll
++		return ret;
++	}
++
++	for (idx = 0; idx < ARRAY_SIZE(g_fs1801_pll_tbl); idx++) {
++		if (g_fs1801_pll_tbl[idx].bclk == cfg->i2s_bclk) {
++			break;
++		}
++	}
++	pr_addr(debug, "bclk[%d]: %d", idx, cfg->i2s_bclk);
++	if (idx >= ARRAY_SIZE(g_fs1801_pll_tbl)) {
++		pr_addr(err, "Not found bclk: %d, rate: %d",
++				cfg->i2s_bclk, cfg->i2s_srate);
++		return -EINVAL;
++	}
++
++	ret |= fsm_access_key(fsm_dev, 1);
++	if (cfg->i2s_srate == 32000) {
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_ANACTRL), 0x0101);
++	}
++	else {
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_ANACTRL), 0x0100);
++	}
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL1), g_fs1801_pll_tbl[idx].c1);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL2), g_fs1801_pll_tbl[idx].c2);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL3), g_fs1801_pll_tbl[idx].c3);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL4), 0x000F);
++	ret |= fsm_access_key(fsm_dev, 0);
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++static int fs1801_config_i2s(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	uint16_t i2sctrl;
++	uint16_t i2ssr;
++	int ret;
++
++	if (!fsm_dev || !cfg) {
++		return -EINVAL;
++	}
++	i2ssr = fsm_get_srate_bits(fsm_dev, cfg->i2s_srate);
++	if (i2ssr < 0) {
++		pr_addr(err, "unsupport srate:%d", cfg->i2s_srate);
++		return -EINVAL;
++	}
++	ret = fsm_reg_read(fsm_dev, REG(FSM_I2SCTRL), &i2sctrl);
++	set_bf_val(&i2sctrl, FSM_I2SSR, i2ssr);
++	set_bf_val(&i2sctrl, FSM_I2SF, FSM_FMT_I2S);
++	pr_addr(debug, "srate:%d, val:%04X", cfg->i2s_srate, i2sctrl);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_I2SCTRL), i2sctrl);
++	ret |= fsm_swap_channel(fsm_dev, cfg->next_angle);
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++static int fs1801_store_otp(fsm_dev_t *fsm_dev, uint8_t valOTP)
++{
++	uint16_t sysctrl;
++	uint16_t pllctrl4;
++	uint16_t bstctrl;
++	uint16_t otprdata;
++	int count;
++	int delta;
++	int re25_otp;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	ret = fsm_access_key(fsm_dev, 1);
++	// power on device and ClassD off
++	ret |= fsm_reg_read(fsm_dev, REG(FSM_SYSCTRL), &sysctrl);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), 0x0000);
++	ret |= fsm_reg_read(fsm_dev, REG(FSM_PLLCTRL4), &pllctrl4);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL4), 0x000F);
++	ret |= fsm_reg_multiread(fsm_dev, REG(FSM_BSTCTRL), &bstctrl);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_BSTCTRL), 0x0000);
++
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_OTPADDR), 0x0010);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_OTPCMD), 0x0000);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_OTPCMD), 0x0001);
++
++	do {
++		ret |= fsm_wait_stable(fsm_dev, FSM_WAIT_OTP_READY);
++		if (ret) {
++			pr_addr(err, "wait OTP ready fail:%d", ret);
++			break;
++		}
++		ret = fsm_reg_multiread(fsm_dev, REG(FSM_OTPRDATA), &otprdata);
++		fsm_parse_otp(fsm_dev, otprdata, &re25_otp, &count);
++		pr_addr(info, "re25 old:%d, new:%d", re25_otp, fsm_dev->re25);
++		delta = abs(re25_otp - fsm_dev->re25);
++		if (delta < (FSM_MAGNIF(fsm_dev->spkr) / 20)) {
++			pr_addr(info, "not need to update otp, delta:%d", delta);
++			break;
++		}
++		if (count >= fsm_dev->compat.otp_max_count) {
++			pr_addr(err, "count exceeds max:%d", count);
++			ret = -EINVAL;
++			break;
++		}
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL4), 0x000B);
++		// enable boost and follow mode
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_BSTCTRL), 0x0008);
++		fsm_wait_stable(fsm_dev, FSM_WAIT_BOOST_SSEND);
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_OTPADDR), 0x0010);
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_OTPWDATA), (uint16_t)valOTP);
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_OTPCMD), 0x0000);
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_OTPCMD), 0x2000);
++		ret |= fsm_wait_stable(fsm_dev, FSM_WAIT_BOOST_SSEND);
++		if (ret) {
++			pr_addr(err, "wait boost ready failed");
++			break;
++		}
++		ret = fsm_reg_write(fsm_dev, REG(FSM_OTPCMD), 0x2002);
++		ret |= fsm_wait_stable(fsm_dev, FSM_WAIT_OTP_READY);
++		if (ret) {
++			pr_addr(err, "wait OTP ready failed");
++			break;
++		}
++		ret = fsm_reg_write(fsm_dev, REG(FSM_OTPCMD), 0x0000);
++		fsm_delay_ms(1);
++		// disable boost and discharge
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_BSTCTRL), 0x0001);
++		fsm_delay_ms(5);
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_BSTCTRL), 0x0000);
++		// read back otp info
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL4), 0x000A);
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_BSTCTRL), 0x0000);
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_OTPADDR), 0x0010);
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_OTPCMD), 0x0000);
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_OTPCMD), 0x0001);
++		ret |= fsm_wait_stable(fsm_dev, FSM_WAIT_OTP_READY);
++		if (ret) {
++			pr_addr(err, "wait OTP ready failed");
++			break;
++		}
++		ret = fsm_reg_multiread(fsm_dev, REG(FSM_OTPRDATA), &otprdata);
++		if (HIGH8(otprdata) != valOTP) {
++			pr_addr(err, "read back failed:%04X(expect:%04X)",
++					otprdata, valOTP);
++			ret = -EINVAL;
++			break;
++		}
++		fsm_parse_otp(fsm_dev, otprdata, &re25_otp, &count);
++		fsm_dev->cal_count = count;
++		pr_addr(info, "read back count:%d", count);
++	} while(0);
++
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_BSTCTRL), bstctrl);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL4), pllctrl4);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), sysctrl);
++	ret |= fsm_access_key(fsm_dev, 0);
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++static int fs1801_update_otctrl(fsm_dev_t *fsm_dev)
++{
++	uint16_t otppg1w0;
++	uint16_t otctrl;
++	int new_val;
++	int offset;
++	int ret;
++
++	ret = fsm_access_key(fsm_dev, 1);
++	ret |= fsm_reg_read(fsm_dev, REG(FSM_OTPPG1W0), &otppg1w0);
++	ret |= fsm_reg_read(fsm_dev, REG(FSM_OTCTRL), &otctrl);
++	offset = (otppg1w0 & 0x007F);
++	if ((otppg1w0 & 0x0080) != 0) {
++		offset = (-1 * offset);
++	}
++	do {
++		new_val = offset + LOW8(otctrl);
++		if (new_val < 0 || new_val > 0xFF)
++			break;
++		otctrl = ((otctrl & 0xFF00) | new_val);
++		new_val = offset + HIGH8(otctrl);
++		if (new_val < 0 || new_val > 0xFF)
++			break;
++		otctrl = ((otctrl & 0x00FF) | (new_val << 8));
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_OTCTRL), otctrl);
++	} while (0);
++	ret |= fsm_access_key(fsm_dev, 0);
++
++	return ret;
++}
++
++int fs1801_reg_init(fsm_dev_t *fsm_dev)
++{
++	int ret;
++
++	if (!fsm_dev) {
++		return -EINVAL;
++	}
++	ret = fs1801_i2c_reset(fsm_dev);
++	ret |= fsm_reg_write(fsm_dev, 0xC4, 0x000A);
++	fsm_delay_ms(5); // 5ms
++	ret |= fsm_reg_write(fsm_dev, 0x06, 0x0000);
++	ret |= fsm_access_key(fsm_dev, 1);
++	ret |= fsm_reg_write(fsm_dev, 0xD3, 0x0100);
++	ret |= fsm_reg_write(fsm_dev, 0xC0, 0x15C0);
++	ret |= fsm_reg_write(fsm_dev, 0xC4, 0x000F);
++	ret |= fsm_reg_write(fsm_dev, 0xAE, 0x0210);
++	ret |= fsm_reg_write(fsm_dev, 0xB9, 0xFFFF);
++	ret |= fsm_reg_write(fsm_dev, 0x09, 0x0000);
++	ret |= fsm_reg_write(fsm_dev, 0xCD, 0x2004);
++	ret |= fsm_reg_write(fsm_dev, 0xA1, 0x1C92);
++	ret |= fs1801_update_otctrl(fsm_dev);
++	ret |= fsm_access_key(fsm_dev, 0);
++	fsm_dev->errcode = ret;
++
++	return ret;
++}
++
++static int fs1801_f0_reg_init(fsm_dev_t *fsm_dev)
++{
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	ret = fs1801_i2c_reset(fsm_dev);
++	ret |= fsm_access_key(fsm_dev, 1);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_AUDIOCTRL), 0xFF00);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_DACCTRL), 0x0210);
++	fs1801_config_i2s(fsm_dev);
++	fs1801_config_pll(fsm_dev, true);
++	// Make sure 0xC4 is 0x000F
++	ret |= fsm_set_bf(fsm_dev, FSM_CHS12, 3);
++	// ValD0 Bypass OT
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_ANACTRL), 0x0120);
++	//DCR Bypass
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_AUXCFG), 0x1020);
++	// Power up
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), 0x0000);
++	// Boost control
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_BSTCTRL), 0xBF0E);
++	// ret |= fsm_reg_read(fsm_dev, REG(FSM_STATUS), NULL);
++	// DSP control
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_DSPCTRL), 0x1012);
++	// ret |= fsm_reg_write(fsm_dev, REG(FSM_ACSCTRL), 0x9880);
++	// ADC control, adc env, adc time
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_ADCCTRL), 0x0300);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_ADCENV), 0x9FFF);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_ADCTIME), 0x0038);
++	// BFL, AGC
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_BFLCTRL), 0x0006);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_BFLSET), 0x009F);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_AGC), 0x00B7);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_DRPARA), 0x0001);
++	ret |= fsm_access_key(fsm_dev, 0);
++	// TS control
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_TSCTRL), 0x162F);
++	// wait stable: DACRUN=0
++	ret |= fsm_wait_stable(fsm_dev, FSM_WAIT_AMP_OFF);
++	if (ret) {
++		pr_addr(err, "wait timeout");
++		return ret;
++	}
++
++	return ret;
++}
++
++static int fs1801_f0_ram_init(fsm_dev_t *fsm_dev)
++{
++	int32_t coef_ad[COEF_LEN] = {0x00674612, 0x0098B9EC, 0x001801AD, 0x002794B3, 0x001801AD};
++	uint8_t buf[sizeof(uint32_t)];
++	int ret;
++	int i;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	ret = fsm_access_key(fsm_dev, 1);
++	// Set ADC coef(B0, B1)
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_ADCEQA), 0x0000);
++	for (i = 0; i < COEF_LEN; i++) {
++		convert_data_to_bytes(coef_ad[i], buf);
++		ret |= fsm_burst_write(fsm_dev, REG(FSM_ADCEQWL), buf, sizeof(uint32_t));
++	}
++	for (i = 0; i < COEF_LEN; i++) {
++		convert_data_to_bytes(coef_ad[i], buf);
++		ret |= fsm_burst_write(fsm_dev, REG(FSM_ADCEQWL), buf, sizeof(uint32_t));
++	}
++	ret |= fsm_access_key(fsm_dev, 0);
++
++	return ret;
++}
++
++int fs1801_pre_f0_test(fsm_dev_t *fsm_dev)
++{
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	fsm_dev->f0 = 0;
++	fsm_dev->state.f0_runing = true;
++	if (fsm_dev->tdata) {
++		fsm_dev->tdata->test_f0 = 0;
++		memset(&fsm_dev->tdata->f0, 0, sizeof(struct f0_data));
++	}
++	ret = fs1801_f0_reg_init(fsm_dev);
++	// make sure amp off here
++	// ret |= fsm_reg_read(fsm_dev, REG(FSM_SYSCTRL), NULL);
++	ret = fsm_access_key(fsm_dev, 1);
++	ret |= fs1801_f0_ram_init(fsm_dev);
++	// ADC on
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_ADCCTRL), 0x1300);
++	ret |= fsm_access_key(fsm_dev, 0);
++	fsm_dev->errcode = ret;
++
++	FSM_ADDR_EXIT(ret);
++	return ret;
++}
++
++int fs1801_f0_test(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	const uint32_t *coef_acsbp = NULL;
++	uint8_t buf[sizeof(uint32_t)];
++	int freq;
++	int ret;
++	int i;
++
++	if (fsm_dev == NULL || !cfg) {
++		return -EINVAL;
++	}
++
++	if (!fsm_dev->state.f0_runing) {
++		pr_addr(info, "invalid running state");
++		return 0;
++	}
++	// CalculateBPCoef
++	freq = cfg->test_freq;
++	for (i = 0; i < ARRAY_SIZE(g_fs1801_bpcoef_table); i++) {
++		if (freq == g_fs1801_bpcoef_table[i].freq) {
++			coef_acsbp = g_fs1801_bpcoef_table[i].coef;
++			break;
++		}
++	}
++	if (!coef_acsbp) {
++		pr_addr(err, "freq no matched: %d", freq);
++		return -EINVAL;
++	}
++	// Keep amp off here.
++	ret = fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), 0x0000);
++	// wait stable
++	ret = fsm_wait_stable(fsm_dev, FSM_WAIT_AMP_OFF);
++	if (ret) {
++		return ret;
++	}
++	// ACS EQ band 0 and band 1
++	ret |= fsm_access_key(fsm_dev, 1);
++	ret |= fsm_reg_write(fsm_dev, fsm_dev->compat.ACSEQA, 0x0000); // 0xA6
++	for(i = 0; i < COEF_LEN; i++) {
++		convert_data_to_bytes(coef_acsbp[i], buf);
++		ret |= fsm_burst_write(fsm_dev, fsm_dev->compat.ACSEQWL, buf, sizeof(uint32_t));
++	}
++	for(i = 0; i < COEF_LEN; i++) {
++		convert_data_to_bytes(coef_acsbp[i], buf);
++		ret |= fsm_burst_write(fsm_dev, fsm_dev->compat.ACSEQWL, buf, sizeof(uint32_t));
++	}
++	ret |= fsm_access_key(fsm_dev, 0);
++	// Amp on
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), 0x0008);
++	// now need sleep 350ms, first time need 700ms
++
++	FSM_ADDR_EXIT(ret);
++	return ret;
++}
++
++int fs1801_post_f0_test(fsm_dev_t *fsm_dev)
++{
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	if (!fsm_dev->state.f0_runing) {
++		pr_addr(info, "invalid running state");
++		return 0;
++	}
++	fsm_dev->state.f0_runing = false;
++	ret = fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), 0x0001);
++
++	return ret;
++}
++
++void fs1801_ops(fsm_dev_t *fsm_dev)
++{
++	if (!fsm_dev) {
++		return;
++	}
++	fsm_dev->dev_ops.reg_init = fs1801_reg_init;
++	fsm_dev->dev_ops.i2s_config = fs1801_config_i2s;
++	fsm_dev->dev_ops.pll_config = fs1801_config_pll;
++	fsm_dev->dev_ops.store_otp = fs1801_store_otp;
++	fsm_dev->dev_ops.pre_f0_test = fs1801_pre_f0_test;
++	fsm_dev->dev_ops.f0_test = fs1801_f0_test;
++	fsm_dev->dev_ops.post_f0_test = fs1801_post_f0_test;
++	fsm_dev->compat.preset_unit_len = FS1801_PRESET_EQ_LEN;
++	fsm_dev->compat.addr_excer_ram = FS1801_EXCER_RAM_ADDR;
++	fsm_dev->compat.otp_max_count = FS1801_OTP_COUNT_MAX;
++	fsm_dev->compat.ACSEQA = REG(FS1801_DACEQA);
++	fsm_dev->compat.ACSEQWL = REG(FS1801_DACEQWL);
++	fsm_dev->compat.DACEQA = REG(FS1801_DACEQA);
++	fsm_dev->compat.DACEQWL = REG(FS1801_DACEQWL);
++	fsm_dev->compat.RS2RL_RATIO = FS1801_RS2RL_RATIO;
++}
++#endif
+diff --git a/sound/soc/codecs/foursemi/fs1801_reg_bf.h b/sound/soc/codecs/foursemi/fs1801_reg_bf.h
+new file mode 100644
+index 000000000..4a04a7156
+--- /dev/null
++++ b/sound/soc/codecs/foursemi/fs1801_reg_bf.h
+@@ -0,0 +1,414 @@
++/**
++ * Copyright (C) 2016-2019 Fourier Semiconductor Inc. All rights reserved.
++ * 2019-08-29 File created.
++ */
++
++#ifndef __FS1801_H__
++#define __FS1801_H__
++
++#define FS1801_STATUS         0xF000
++#define FS1801_BOVDS          0x0000
++#define FS1801_PLLS           0x0100
++#define FS1801_OTDS           0x0200
++#define FS1801_OVDS           0x0300
++#define FS1801_UVDS           0x0400
++#define FS1801_OCDS           0x0500
++#define FS1801_CLKS           0x0600
++#define FS1801_SPKS           0x0A00
++#define FS1801_SPKT           0x0B00
++
++#define FS1801_BATS           0xF001
++#define FS1801_BATV           0x9001
++
++#define FS1801_TEMPS          0xF002
++#define FS1801_TEMPV          0x8002
++
++#define FS1801_ID             0xF003
++#define FS1801_REV            0x7003
++#define FS1801_DEVID          0x7803
++
++#define FS1801_I2SCTRL        0xF004
++#define FS1801_I2SF           0x2004
++#define FS1801_CHS12          0x1304
++#define FS1801_DISP           0x0A04
++#define FS1801_I2SDOE         0x0B04
++#define FS1801_I2SSR          0x3C04
++
++#define FS1801_ANASTAT        0xF005
++#define FS1801_VBGS           0x0005
++#define FS1801_PLLSTAT        0x0105
++#define FS1801_BSTS           0x0205
++#define FS1801_AMPS           0x0305
++#define FS1801_OTPRDE         0x0805
++
++#define FS1801_AUDIOCTRL      0xF006
++#define FS1801_VOL            0x7806
++
++#define FS1801_TEMPSEL        0xF008
++#define FS1801_EXTTS          0x8108
++
++#define FS1801_SYSCTRL        0xF009
++#define FS1801_PWDN           0x0009
++#define FS1801_I2CR           0x0109
++#define FS1801_AMPE           0x0309
++
++#define FS1801_SPKSET         0xF00A
++#define FS1801_SPKR           0x190A
++
++#define FS1801_OTPACC         0xF00B
++#define FS1801_TRIMKEY        0x700B
++#define FS1801_REKEY          0x780B
++
++#define FS1801_SPKSTATUS      0xF080
++#define FS1801_CALSTAT        0x0180
++
++#define FS1801_ACSCTRL        0xF089
++#define FS1801_ACS_COE_SEL    0x0489
++#define FS1801_MBDRC_EN       0x0789
++#define FS1801_EQEN           0x0C89
++#define FS1801_ACS_EN         0x0F89
++
++#define FS1801_ACSDRC         0xF08A
++#define FS1801_DRCS1_EN       0x008A
++#define FS1801_DRCS2_EN       0x018A
++#define FS1801_DRCS3_EN       0x028A
++#define FS1801_DRC_ENV_W      0x188A
++
++#define FS1801_ACSDRCS        0xF08B
++#define FS1801_DRCS11_EN      0x028B
++#define FS1801_DRCS12_EN      0x048B
++#define FS1801_DRCS21_EN      0x078B
++#define FS1801_DRCS22_EN      0x098B
++#define FS1801_DRCS31_EN      0x0C8B
++#define FS1801_DRCS32_EN      0x0E8B
++
++#define FS1801_CHIPINI        0xF090
++#define FS1801_INIFINISH      0x0090
++#define FS1801_INIOK          0x0190
++
++#define FS1801_I2CADD         0xF091
++#define FS1801_ADR            0x6091
++
++#define FS1801_BISTCTL1       0xF09C
++#define FS1801_GO             0x009C
++#define FS1801_MODE           0x019C
++#define FS1801_TRAMSEL        0x029C
++#define FS1801_HCLKEN         0x039C
++#define FS1801_RAM1_SKIP      0x049C
++#define FS1801_RAM2_SKIP      0x059C
++#define FS1801_RAM3_SKIP      0x069C
++#define FS1801_RAM4_SKIP      0x079C
++#define FS1801_RAM5_SKIP      0x089C
++#define FS1801_RAM6_SKIP      0x099C
++#define FS1801_RAM7_SKIP      0x0A9C
++#define FS1801_RAM8_SKIP      0x0B9C
++#define FS1801_RAM9_SKIP      0x0C9C
++#define FS1801_RAMA_SKIP      0x0D9C
++#define FS1801_RAMB_SKIP      0x0E9C
++#define FS1801_RAMC_SKIP      0x0F9C
++
++#define FS1801_BISTSTAT1      0xF09D
++#define FS1801_RAM            0x309D
++#define FS1801_FAIL           0x049D
++#define FS1801_ACTIVE         0x069D
++#define FS1801_DONE           0x079D
++#define FS1801_ADDR           0x789D
++
++#define FS1801_BISTSTAT2      0xF09E
++
++#define FS1801_BISTSTAT3      0xF09F
++
++#define FS1801_I2SSET         0xF0A0
++#define FS1801_AECRS          0x10A0
++#define FS1801_BCMP           0x13A0
++#define FS1801_LRCLKP         0x05A0
++#define FS1801_BCLKP          0x06A0
++#define FS1801_I2SOSWAP       0x07A0
++#define FS1801_AECSELL        0x28A0
++#define FS1801_AECSELR        0x2CA0
++#define FS1801_BCLKSTA        0x0FA0
++
++#define FS1801_DSPCTRL        0xF0A1
++#define FS1801_DCCOEF         0x20A1
++#define FS1801_NOFILTEN       0x04A1
++#define FS1801_POSTEQEN       0x0BA1
++#define FS1801_DSPEN          0x0CA1
++#define FS1801_EQCOEFSEL      0x0DA1
++
++#define FS1801_DACEQWL        0xF0A2
++
++#define FS1801_DACEQWH        0xF0A3
++
++#define FS1801_DACEQRL        0xF0A4
++
++#define FS1801_DACEQRH        0xF0A5
++
++#define FS1801_DACEQA         0xF0A6
++
++#define FS1801_BFLCTRL        0xF0A7
++
++#define FS1801_BFLSET         0xF0A8
++
++#define FS1801_SQC            0xF0A9
++
++#define FS1801_AGC            0xF0AA
++
++#define FS1801_DACPEAKRD      0xF0AB
++#define FS1801_SEL            0x40AB
++
++#define FS1801_PDCCTRL        0xF0AC
++#define FS1801_RMEN           0x08AC
++#define FS1801_TIME           0x29AC
++#define FS1801_THD            0x2CAC
++
++#define FS1801_DRPARA         0xF0AD
++#define FS1801_DRC            0xC0AD
++
++#define FS1801_DACCTRL        0xF0AE
++#define FS1801_SDMSTLBYP      0x04AE
++#define FS1801_MUTE           0x08AE
++#define FS1801_FADE           0x09AE
++
++#define FS1801_TSCTRL         0xF0AF
++#define FS1801_TSGAIN         0x20AF
++#define FS1801_TSEN           0x03AF
++#define FS1801_OFF_THD        0x24AF
++#define FS1801_OFF_DELAY      0x28AF
++#define FS1801_ZEROOFF        0x0CAF
++#define FS1801_AUTOOFF        0x0DAF
++#define FS1801_OFFSTA         0x0EAF
++
++#define FS1801_MODCTRL        0xF0B0
++#define FS1801_G1_SEL         0x20B0
++#define FS1801_G2_SEL         0x23B0
++#define FS1801_DEMBYP         0x07B0
++#define FS1801_DITHPOS        0x48B0
++#define FS1801_DITHRANGE      0x0DB0
++#define FS1801_DITHCLR        0x0EB0
++#define FS1801_DITHEN         0x0FB0
++
++#define FS1801_DTINI          0xF0B1
++
++#define FS1801_DTFD           0xF0B2
++
++#define FS1801_ADCCTRL        0xF0B3
++#define FS1801_EQB1EN_R       0x08B3
++#define FS1801_EQB0EN_R       0x09B3
++#define FS1801_ADCRGAIN       0x1AB3
++#define FS1801_ADCREN         0x0CB3
++#define FS1801_ADCRSEL        0x0DB3
++
++#define FS1801_ADCEQWL        0xF0B4
++
++#define FS1801_ADCEQWH        0xF0B5
++
++#define FS1801_ADCEQRL        0xF0B6
++
++#define FS1801_ADCEQRH        0xF0B7
++
++#define FS1801_ADCEQA         0xF0B8
++
++#define FS1801_ADCENV         0xF0B9
++#define FS1801_AMP_DT_A       0xC0B9
++#define FS1801_AVG_NUM        0x1DB9
++#define FS1801_AMP_DT_EN      0x0FB9
++
++#define FS1801_ADCTIME        0xF0BA
++#define FS1801_STABLE_TM      0x20BA
++#define FS1801_CHK_TM         0x23BA
++
++#define FS1801_ZMDATA         0xF0BB
++#define FS1801_XAVGM          0x70BB
++#define FS1801_XAVGH          0x78BB
++
++#define FS1801_DACENV         0xF0BC
++#define FS1801_MBYTE          0x70BC
++#define FS1801_HBYTE          0x78BC
++
++#define FS1801_DIGSTAT        0xF0BD
++#define FS1801_ADCRUN         0x00BD
++#define FS1801_DACRUN         0x01BD
++#define FS1801_DSPFLAG        0x03BD
++#define FS1801_STSPKM24       0x04BD
++#define FS1801_STSPKM6        0x05BD
++#define FS1801_STSPKRE        0x06BD
++#define FS1801_SPKFSM         0x3CBD
++
++#define FS1801_I2SPINC        0xF0BE
++#define FS1801_BCPDD          0x00BE
++#define FS1801_LRPDD          0x01BE
++#define FS1801_SDOPDD         0x02BE
++#define FS1801_SDIPDD         0x03BE
++
++#define FS1801_BSTCTRL        0xF0C0
++#define FS1801_DISCHARGE      0x00C0
++#define FS1801_DAC_GAIN       0x11C0
++#define FS1801_BSTEN          0x03C0
++#define FS1801_MODE_CTRL      0x14C0
++#define FS1801_ILIM_SEL       0x36C0
++#define FS1801_VOUT_SEL       0x3AC0
++#define FS1801_SSEND          0x0FC0
++
++#define FS1801_PLLCTRL1       0xF0C1
++#define FS1801_POSTSEL        0x12C1
++#define FS1801_FINSEL         0x14C1
++#define FS1801_BWSEL          0x16C1
++#define FS1801_ICPSEL         0x18C1
++
++#define FS1801_PLLCTRL2       0xF0C2
++
++#define FS1801_PLLCTRL3       0xF0C3
++
++#define FS1801_PLLCTRL4       0xF0C4
++#define FS1801_PLLEN          0x00C4
++#define FS1801_OSCEN          0x01C4
++#define FS1801_ZMEN           0x02C4
++#define FS1801_VBGEN          0x03C4
++
++#define FS1801_OCCTRL         0xF0C5
++#define FS1801_OCNUM          0x70C5
++
++#define FS1801_OTCTRL         0xF0C6
++#define FS1801_OTTHD_L        0x70C6
++#define FS1801_OTTHD_H        0x78C6
++
++#define FS1801_UVCTRL         0xF0C7
++#define FS1801_UVTHD_L        0x70C7
++#define FS1801_UVTHD_H        0x78C7
++
++#define FS1801_OVCTRL         0xF0C8
++#define FS1801_OVTHD_L        0x70C8
++#define FS1801_OVTHD_H        0x78C8
++
++#define FS1801_SPKERR         0xF0C9
++
++#define FS1801_SPKM24         0xF0CA
++
++#define FS1801_SPKM6          0xF0CB
++
++#define FS1801_SPKRE          0xF0CC
++
++#define FS1801_SPKMDB         0xF0CD
++#define FS1801_DBVSPKM6       0x70CD
++#define FS1801_DBVSPKM24      0x78CD
++
++#define FS1801_ADPBST         0xF0CF
++#define FS1801_TFSEL          0x12CF
++#define FS1801_TRSEL          0x14CF
++#define FS1801_DCG_SEL        0x1ECF
++
++#define FS1801_ANACTRL        0xF0D0
++#define FS1801_BPCLKCK        0x00D0
++#define FS1801_BPUVOV         0x01D0
++#define FS1801_BPOT           0x02D0
++#define FS1801_BPOC           0x03D0
++#define FS1801_BPOV           0x04D0
++#define FS1801_BPSPKOT        0x05D0
++#define FS1801_PTSEQBP        0x06D0
++#define FS1801_HWSEQEN        0x08D0
++#define FS1801_FSWSDLY        0x2CD0
++#define FS1801_FSWSDLYEN      0x0FD0
++
++#define FS1801_BSTTEST        0xF0D1
++#define FS1801_BSTMODE        0x20D1
++#define FS1801_BSTTMEN        0x04D1
++#define FS1801_CLADEN         0x05D1
++#define FS1801_ENVSEL         0x08D1
++#define FS1801_ENV            0x19D1
++
++#define FS1801_CLDTEST        0xF0D2
++#define FS1801_DRVTM          0x00D2
++#define FS1801_TB2EN          0x01D2
++#define FS1801_TB2SEL         0x32D2
++#define FS1801_TB1EN          0x06D2
++#define FS1801_TB1SEL         0x37D2
++#define FS1801_PORTWM         0x0BD2
++
++#define FS1801_CLDCTRL        0xF0D3
++#define FS1801_DAMPTB         0x70D3
++#define FS1801_SDZREG         0x08D3
++#define FS1801_DEGCLKBP       0x0AD3
++#define FS1801_SEQBP          0x0BD3
++
++#define FS1801_REFGEN         0xF0D4
++#define FS1801_TMSELVIN3      0x0CD4
++#define FS1801_TMSELVBG       0x0DD4
++
++#define FS1801_ZMCONFIG       0xF0D5
++#define FS1801_CALIBEN        0x04D5
++
++#define FS1801_AUXCFG         0xF0D7
++#define FS1801_CRAMACKSEL     0x01D7
++#define FS1801_CLKSWSEL       0x04D7
++#define FS1801_CLKSWFORCE     0x05D7
++#define FS1801_DSPRST         0x08D7
++#define FS1801_DCBP           0x0CD7
++
++#define FS1801_CHPTEST        0xF0D8
++#define FS1801_TESTMODE       0x30D8
++#define FS1801_TESTEN         0x04D8
++#define FS1801_VOUTADS1       0x08D8
++#define FS1801_VOUTADS1EN     0x09D8
++#define FS1801_VOUTADS2       0x0AD8
++#define FS1801_VOUTADS2EN     0x0BD8
++#define FS1801_VINADS1EN      0x0CD8
++#define FS1801_VINADS2EN      0x0DD8
++#define FS1801_ATEADS2EN      0x0ED8
++
++#define FS1801_I2CCTRL        0xF0D9
++#define FS1801_TIMEOUTEN      0x00D9
++#define FS1801_BPDEGLITCH     0x01D9
++
++#define FS1801_ANATEST1       0xF0DA
++#define FS1801_SARDO          0x60DA
++#define FS1801_SARINSEL       0x19DA
++#define FS1801_SARTEN         0x0CDA
++#define FS1801_TP1DINDIS      0x0DDA
++#define FS1801_OTPPON         0x0EDA
++#define FS1801_OTPVPP         0x0FDA
++
++#define FS1801_ANATEST2       0xF0DB
++#define FS1801_PLLTEST        0x00DB
++#define FS1801_TPIN1MUX       0x31DB
++#define FS1801_TPIN2MUX       0x35DB
++#define FS1801_TPINOEN        0x09DB
++#define FS1801_EXTPEN         0x0ADB
++#define FS1801_SARBATSAMP     0x0BDB
++#define FS1801_SARBATCOND     0x0CDB
++#define FS1801_ADCENVDTEN     0x0EDB
++#define FS1801_SARTM          0x0FDB
++
++#define FS1801_OTPCMD         0xF0DC
++#define FS1801_OTPCMDR        0x00DC
++#define FS1801_OTPCMDW        0x01DC
++#define FS1801_OTPBUSY        0x02DC
++#define FS1801_EPROM_LD       0x08DC
++#define FS1801_OTPPGW         0x0CDC
++#define FS1801_WMODE          0x0DDC
++
++#define FS1801_OTPADDR        0xF0DD
++
++#define FS1801_OTPWDATA       0xF0DE
++
++#define FS1801_OTPRDATA       0xF0DF
++
++#define FS1801_OTPPG0W0       0xF0E0
++
++#define FS1801_OTPPG0W1       0xF0E1
++
++#define FS1801_OTPPG0W2       0xF0E2
++
++#define FS1801_OTPPG0W3       0xF0E3
++
++#define FS1801_OTPPG1W0       0xF0E4
++
++#define FS1801_OTPPG1W1       0xF0E5
++
++#define FS1801_OTPPG1W2       0xF0E6
++
++#define FS1801_OTPPG1W3       0xF0E7
++
++#define FS1801_OTPPG2         0xF0E8
++
++
++#endif /* Generated at: 2019-08-29.11:01:17 */
+diff --git a/sound/soc/codecs/foursemi/fsm-dev.h b/sound/soc/codecs/foursemi/fsm-dev.h
+new file mode 100644
+index 000000000..79f6d319c
+--- /dev/null
++++ b/sound/soc/codecs/foursemi/fsm-dev.h
+@@ -0,0 +1,663 @@
++/**
++ * Copyright (C) Fourier Semiconductor Inc. 2016-2020. All rights reserved.
++ * 2018-10-16 File created.
++ */
++
++#ifndef __FSM_DEV_H__
++#define __FSM_DEV_H__
++
++#ifndef pr_fmt
++#define pr_fmt(fmt) "%s: " fmt "\n", __func__
++#endif
++#if defined(__KERNEL__)
++#include <linux/module.h>
++#include <linux/regmap.h>
++//#include <linux/miscdevice.h>
++#include <linux/ioctl.h>
++#include <linux/workqueue.h>
++#include <linux/list.h>
++#include <linux/i2c.h>
++#include <linux/mutex.h>
++#include <linux/slab.h>
++#include <linux/delay.h>
++#if defined(CONFIG_REGULATOR)
++#include <linux/regulator/consumer.h>
++#endif
++#define logprint(fmt, args...) printk(KERN_CONT fmt, ##args)
++#define pr_warning pr_warn
++#elif defined(FSM_HAL_SUPPORT)
++#include <stdio.h>
++#include <string.h>
++#include <stdint.h>
++#include <errno.h>
++#include <stdlib.h>
++#include <stdbool.h>
++#if defined(CONFIG_FSM_STEREO)
++#include "fsm_list.h"
++#endif
++
++/* debug info */
++#ifdef FSM_DEBUG
++#undef NDEBUG
++#define LOG_NDEBUG 0  // open LOGV
++#endif
++
++#if defined(LOG_TAG)
++#undef LOG_TAG
++#endif
++#define LOG_TAG "fsm_hal"
++
++#ifndef ARRAY_SIZE
++#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
++#endif
++
++#if defined(FSM_APP)
++#if defined(FSM_DEBUG)
++#define pr_debug(fmt, args...) printf("%s: " fmt "\n", __func__, ##args)
++#else
++#define pr_debug(fmt, args...)
++#endif
++#define pr_info(fmt, args...) printf("%s: " fmt "\n", __func__, ##args)
++#define pr_err(fmt, args...) printf("%s: " fmt "\n", __func__, ##args)
++#define pr_warning(fmt, args...) printf("%s: " fmt "\n", __func__, ##args)
++#define logprint(fmt, args...) printf(fmt "\n", ##args)
++#elif defined(__NDK_BUILD__)
++#include<android/log.h>
++#define pr_debug(fmt, args...) __android_log_print(ANDROID_LOG_DEBUG,\
++		LOG_TAG, "%s: " fmt, __func__, ##args)
++#define pr_info(fmt, args...) __android_log_print(ANDROID_LOG_INFO,\
++		LOG_TAG, "%s: " fmt, __func__, ##args)
++#define pr_err(fmt, args...) __android_log_print(ANDROID_LOG_ERROR,\
++		LOG_TAG, "%s: " fmt, __func__, ##args)
++#define pr_warning(fmt, args...) __android_log_print(ANDROID_LOG_ERROR,\
++		LOG_TAG, "%s: " fmt, __func__, ##args)
++#define logprint(fmt, args...) __android_log_print(ANDROID_LOG_INFO,\
++		LOG_TAG, fmt "\n", ##args)
++#elif defined(__ANDROID__)
++#include <utils/Log.h>
++#define pr_debug(fmt, args...) __android_log_print(ANDROID_LOG_DEBUG,\
++		LOG_TAG, "%s: " fmt, __func__, ##args)
++#define pr_info(fmt, args...) __android_log_print(ANDROID_LOG_INFO,\
++		LOG_TAG, "%s: " fmt, __func__, ##args)
++#define pr_err(fmt, args...) __android_log_print(ANDROID_LOG_ERROR,\
++		LOG_TAG, "%s: " fmt, __func__, ##args)
++#define pr_warning(fmt, args...) __android_log_print(ANDROID_LOG_ERROR,\
++		LOG_TAG, "%s: " fmt, __func__, ##args)
++#define logprint(fmt, args...) __android_log_print(ANDROID_LOG_INFO,\
++		LOG_TAG, fmt "\n", ##args)
++#else
++#define pr_debug(fmt, args...)
++#define pr_info(fmt, args...)
++#define pr_err(fmt, args...)
++#define pr_warning(fmt, args...)
++#define logprint(fmt, args...)
++#endif
++#endif
++#define pr_addr(type, fmt, args...) \
++		pr_##type("%02X: " fmt, fsm_dev->addr, ##args)
++
++#define FSM_DRV_NAME     "fs18xx"
++#define FSM_FW_NAME      "fs18xx.fsm"
++
++/* VERSION INFORMATION */
++#define FSM_CODE_VERSION "v3.0.2"
++#define FSM_CODE_DATE    "20200620-1409"
++#define FSM_GIT_BRANCH   "Wingtech-N19"
++#define FSM_GIT_COMMIT   "bc788cfe"
++
++#define FSM_FUNC_EXIT(ret) \
++	do { \
++		if (ret) \
++			pr_err("err: %d", ret); \
++	} while(0)
++
++#define FSM_ADDR_EXIT(ret) \
++	do { \
++		if (ret) \
++			pr_addr(err, "err: %d", ret); \
++	} while(0)
++
++#define UNUSED(expr) do { (void)(expr); } while(0)
++
++enum dev_id_index {
++	FS1601S_DEV_ID = 0x3,
++	FS1603_DEV_ID = 0x5,
++	FS1818_DEV_ID = 0x6,
++	FS1860_DEV_ID = 0x7,
++	FS1896_DEV_ID = 0xB,
++	FSM_DEV_ID_MAX,
++};
++#define FS1894S_REVID 0X05B1
++
++#define CUST_NAME_SIZE        (32)
++#define STRING_LEN_MAX        (255)
++#define STEREO_COEF_LEN       (10)
++#define FSM_MAGNIF_FACTOR     (10) // magnification factor: 2^(x)
++#define FSM_SPKR_ALLOWANCE    (30) // percentage: %
++#define FSM_RCVR_ALLOWANCE    (20) // percentage: %
++#define FSM_WAIT_STABLE_RETRY (200)
++#define FSM_I2C_RETRY         (20)
++#define FSM_ZMDELTA_MAX       0x150
++#define FSM_RS_TRIM_DEFAULT   0x8F
++#define FSM_MAGNIF_TEMPR_COEF 0xFFFF
++#define FSM_OTP_ACC_KEY2      0xCA91
++#define FSM_DATA_TYPE_RE25    0
++#define FSM_DATA_TYPE_ZMDATA  1
++#define MODULE_INITED         (13579)
++#define FSM_MAGNIF(val)       ((val) << FSM_MAGNIF_FACTOR)
++#define FSM_VBATH_COUNT       (10)
++#define FSM_VBAT_HIGH         (4000) // mV
++#define FSM_VBAT_LOW          (3600) // mV
++// gain step: -0.375dB, max: -0.375 * 8 = -3dB
++#define FSM_VBAT_STEP         ((FSM_VBAT_HIGH - FSM_VBAT_LOW) / 8) // mV
++
++#define FSM_DEV_MAX   (4)
++#define FSM_ADDR_BASE (0x34)
++#undef MIN
++#define MIN(a, b)     ((a) < (b) ? (a) : (b))
++#define HIGH8(val)    ((val >> 8) & 0xFF)
++#define LOW8(val)     (val & 0xFF)
++#define WORD(addr)    ((*(addr) << 8) & *((addr) + 1))
++#define REG(bf)       (bf & 0xFF)
++#define FSM_REG_SIZE  sizeof(uint16_t)
++#define FSM_ADDR_SIZE sizeof(uint8_t)
++
++/* scenes defination */
++#define FSM_SCENE_UNKNOW           (0)
++#define FSM_SCENE_MUSIC            BIT(0)
++#define FSM_SCENE_VOICE            BIT(1)
++#define FSM_SCENE_VOIP             BIT(2)
++#define FSM_SCENE_RING             BIT(3)
++#define FSM_SCENE_LOW_PWR          BIT(4)
++#define FSM_SCENE_MMI_ALL          BIT(5)
++#define FSM_SCENE_MMI_ALL_BYPASS   BIT(6)
++#define FSM_SCENE_TOP_LEFT         BIT(7)
++#define FSM_SCENE_TOP_LEFT_BYPASS  BIT(8)
++#define FSM_SCENE_TOP_RIGHT        BIT(9)
++#define FSM_SCENE_TOP_RIGHT_BYPASS BIT(10)
++#define FSM_SCENE_BOT_LEFT         BIT(11)
++#define FSM_SCENE_BOT_LEFT_BYPASS  BIT(12)
++#define FSM_SCENE_BOT_RIGHT        BIT(13)
++#define FSM_SCENE_BOT_RIGHT_BYPASS BIT(14)
++#define FSM_SCENE_RCV              BIT(15) // unused
++#define FSM_SCENE_MAX              (15)
++#define FSM_SCENE_COMMON           (0xFFFF)
++#define FSM_VOLUME_MAX             (0xFF)
++#define FSM_ANGLE_MAX             (0xFFFF)
++
++/* f0 test */
++#define ACS_COEF_COUNT   12
++#define COEF_LEN         5
++#define FREQ_START       200  // 100*N
++#define FREQ_END         1500 // bigger than FREQ_START && 100*N
++#define F0_FREQ_STEP     100  // 50*N, N =1,2,3...
++#define F0_COUNT_MAX     ((FREQ_END - FREQ_START) / F0_FREQ_STEP + 1)
++#define FREQ_EXT_COUNT   300
++#define F0_TEST_DELAY_MS 500
++
++#define FSM_POS_MONO (0)
++#define FSM_POS_LTOP BIT(3)
++#define FSM_POS_LBTM BIT(2)
++#define FSM_POS_RTOP BIT(1)
++#define FSM_POS_RBTM BIT(0)
++
++//#undef NULL
++//#define NULL ((void *)0)
++//
++//enum {
++//	false	= 0,
++//	true	= 1
++//};
++
++enum fsm_error {
++	FSM_ERROR_OK = 0,
++	FSM_ERROR_BAD_PARMS,
++	FSM_ERROR_I2C_FATAL,
++	FSM_ERROR_NO_SCENE_MATCH,
++	FSM_ERROR_RE25_INVAILD,
++	FSM_ERROR_MAX,
++};
++
++enum fsm_channel {
++	FSM_CHN_UNKNOW = 0,
++	FSM_CHN_LEFT   = 1,
++	FSM_CHN_RIGHT  = 2,
++	FSM_CHN_MONO   = 3,
++};
++
++enum fsm_format {
++	FSM_FMT_DSP    = 1,
++	FSM_FMT_MSB    = 2,
++	FSM_FMT_I2S    = 3,
++	FSM_FMT_LSB_16 = 4,
++	FSM_FMT_LSB_20 = 6,
++	FSM_FMT_LSB_24 = 7,
++};
++
++enum fsm_bstmode {
++	FSM_BSTMODE_FLW = 0,
++	FSM_BSTMODE_BST = 1,
++	FSM_BSTMODE_ADP = 2,
++};
++
++enum fsm_dsp_state {
++	FSM_DSP_OFF = 0,
++	FSM_DSP_ON  = 1,
++};
++
++enum fsm_wait_type {
++	FSM_WAIT_AMP_ON = 1,
++	FSM_WAIT_AMP_ADC_ON,
++	FSM_WAIT_AMP_OFF,
++	FSM_WAIT_AMP_ADC_OFF,
++	FSM_WAIT_AMP_ADC_PLL_OFF,
++	FSM_WAIT_TSIGNAL_ON,
++	FSM_WAIT_TSIGNAL_OFF,
++	FSM_WAIT_OTP_READY,
++	FSM_WAIT_BOOST_SSEND,
++	FSM_WAIT_STATUS_ON,
++};
++
++enum fsm_eq_ram_type {
++	FSM_EQ_RAM0 = 0,
++	FSM_EQ_RAM1,
++	FSM_EQ_RAM_MAX,
++};
++
++struct fsm_version {
++	char git_branch[50];
++	char git_commit[41];
++	char code_date[18];
++	char code_version[10];
++};
++typedef struct fsm_version fsm_version_t;
++
++struct fsm_pll_config {
++	uint32_t bclk;
++	uint16_t c1;
++	uint16_t c2;
++	uint16_t c3;
++};
++typedef struct fsm_pll_config fsm_pll_config_t;
++
++#define PRESET_VER_FS1601S 0x8301 // FS1601S
++#define PRESET_VER_FS1603  0x8501 // FS1603 series
++#define PRESET_VER_FS1801  0x8A01 // FS1801 series
++#define PRESET_VER_FS1860  0x8701 // FS1860
++#define PRESET_VER3        (0x93)
++#define IS_PRESET_V3(ver)  (HIGH8(ver) == PRESET_VER3)
++
++enum fsm_dsc_type {
++	FSM_DSC_DEV_INFO = 0,
++	FSM_DSC_SPK_INFO,
++	FSM_DSC_REG_COMMON,
++	FSM_DSC_REG_SCENES,
++	FSM_DSC_PRESET_EQ,
++	FSM_DSC_STEREO_COEF,
++	FSM_DSC_EXCER_RAM,
++	FSM_DSC_MAX,
++};
++
++enum fsm_info_type {
++	FSM_INFO_SPK_TMAX = 0,
++	FSM_INFO_SPK_TEMPR_COEF,
++	FSM_INFO_SPK_TEMPR_SEL,
++	FSM_INFO_SPK_RES,
++	FSM_INFO_SPK_RAPP,
++	FSM_INFO_SPK_TRE,
++	FSM_INFO_SPK_TM6,
++	FSM_INFO_SPK_TM24,
++	FSM_INFO_SPK_TERR,
++	FSM_INFO_SPK_TM01,
++	FSM_INFO_SPK_TM02,
++	FSM_INFO_SPK_TM03,
++	FSM_INFO_SPK_TM04,
++	FSM_INFO_SPK_TM05,
++	FSM_INFO_SPK_TM06,
++	FSM_INFO_RSRL_RATIO,
++	FSM_INFO_SPK_POSITION,
++	FSM_INFO_SPK_MAX,
++};
++
++enum fsm_test_type {
++	TEST_NONE = 0,
++	TEST_RE25,
++	TEST_F0,
++};
++
++#pragma pack(push, 1)
++struct fsm_date {
++	uint32_t min   : 6;
++	uint32_t hour  : 5;
++	uint32_t day   : 5;
++	uint32_t month : 4;
++	uint32_t year  : 12;
++};
++typedef struct fsm_date fsm_date_t;
++
++struct data32_list {
++	uint16_t len;
++	uint32_t data[];
++};
++typedef struct data32_list preset_data_t;
++typedef struct data32_list ram_data_t;
++
++struct uint24 {
++	uint8_t DL;
++	uint8_t DM;
++	uint8_t DH;
++};
++typedef struct uint24 uint24_t;
++
++struct data24_list {
++	uint16_t len;
++	uint24_t data[];
++};
++
++struct data16_list {
++	uint16_t len;
++	uint16_t data[];
++};
++typedef struct data16_list info_list_t;
++typedef struct data16_list stereo_coef_t;
++
++struct fsm_index {
++	uint16_t offset;
++	uint16_t type;
++};
++typedef struct fsm_index fsm_index_t;
++
++struct dev_list {
++	uint16_t preset_ver;
++	char project[8];
++	char customer[8];
++	fsm_date_t date;
++	uint16_t data_len;
++	uint16_t crc16;
++	uint16_t len;
++	uint16_t bus;
++	uint16_t addr;
++	uint16_t dev_type;
++	uint16_t npreset;
++	uint16_t reg_scenes;
++	uint16_t eq_scenes;
++	fsm_index_t index[];
++};
++typedef struct dev_list dev_list_t;
++
++struct preset_list {
++	uint16_t len;
++	uint16_t scene;
++	uint32_t data[];
++};
++typedef struct preset_list preset_list_t;
++
++struct reg_unit {
++	uint16_t addr : 8;
++	uint16_t pos  : 4;
++	uint16_t len  : 4;
++	uint16_t value;
++};
++typedef struct reg_unit reg_unit_t;
++
++struct reg_comm {
++	uint16_t len;
++	reg_unit_t reg[];
++};
++typedef struct reg_comm reg_comm_t;
++
++struct regs_unit {
++	uint16_t scene;
++	reg_unit_t reg;
++};
++typedef struct regs_unit regs_unit_t;
++
++struct reg_scene {
++	uint16_t len;
++	regs_unit_t regs[];
++};
++typedef struct reg_scene reg_scene_t;
++
++struct reg_temp {
++	uint16_t new_val;
++	uint16_t old_val;
++};
++typedef struct reg_temp reg_temp_t;
++
++struct preset_header {
++	uint16_t version;
++	char customer[8];
++	char project[8];
++	fsm_date_t date;
++	uint16_t size;
++	uint16_t crc16;
++	uint16_t ndev;
++};
++
++struct preset_file {
++	struct preset_header hdr;
++	fsm_index_t index[];
++};
++
++#pragma pack(pop)
++
++struct fsm_srate {
++	uint32_t srate  : 28;
++	uint32_t bf_val : 4;
++};
++
++struct fsm_dev;
++
++struct fsm_ops {
++	int (*reg_init)(struct fsm_dev *);
++	int (*dev_init)(struct fsm_dev *);
++	int (*pll_config)(struct fsm_dev *, bool on);
++	int (*i2s_config)(struct fsm_dev *);
++	int (*switch_preset)(struct fsm_dev *);
++	int (*check_stable)(struct fsm_dev *, int type);
++	int (*start_up)(struct fsm_dev *);
++	int (*set_unmute)(struct fsm_dev *);
++	int (*set_tsignal)(struct fsm_dev *, bool enable);
++	int (*set_mute)(struct fsm_dev *, bool mute);
++	int (*shut_down)(struct fsm_dev *);
++	int (*deinit)(struct fsm_dev *);
++	int (*set_monitor)(struct fsm_dev *);
++	int (*dev_recover)(struct fsm_dev *);
++	int (*cal_zmdata)(struct fsm_dev *);
++	int (*pre_calib)(struct fsm_dev *);
++	int (*store_otp)(struct fsm_dev *, uint8_t valOTP);
++	int (*post_calib)(struct fsm_dev *);
++	int (*pre_f0_test)(struct fsm_dev *);
++	int (*f0_test)(struct fsm_dev *);
++	int (*post_f0_test)(struct fsm_dev *);
++};
++typedef struct fsm_ops fsm_ops_t;
++
++struct fsm_config {
++	uint8_t dev_count;
++	uint16_t cur_angle;
++	uint16_t next_angle;
++	uint16_t next_scene;
++	uint16_t test_type;
++	uint16_t test_freq;
++	uint16_t volume;
++	uint16_t state     : 8;
++	uint16_t wait_type : 8;
++	unsigned int i2s_bclk;
++	unsigned int i2s_srate;
++
++	// flags
++	uint32_t codec_inited : 3;
++	uint32_t force_fw     : 1;
++	uint32_t force_init   : 1;
++	uint32_t force_scene  : 1;
++	uint32_t force_calib  : 1;
++	uint32_t store_otp    : 1;
++	uint32_t force_mute   : 1;
++	uint32_t vddd_on      : 1;
++	uint32_t reset_chip   : 1;
++	uint32_t stop_test    : 1;
++	uint32_t skip_monitor : 1;
++	uint32_t use_monitor  : 1;
++	uint32_t stream_muted : 1;
++	uint32_t speaker_on   : 1;
++	//uint32_t bypass_dsp : 1;
++
++	char *codec_name[FSM_DEV_MAX];
++	char *codec_dai_name[FSM_DEV_MAX];
++	char *fw_name;
++	struct preset_file *preset;
++};
++typedef struct fsm_config fsm_config_t;
++
++struct fsm_vbat_state {
++	uint16_t last_batv;
++	uint16_t cur_batv;
++	uint16_t batvh_count;
++};
++
++struct fsm_calib {
++	uint16_t pos  : 8;
++	uint16_t addr : 8;
++	uint16_t cal_zm;
++	uint8_t count;
++	int errcode;
++	int re25;
++	int f0;
++	uint16_t f0_zm[F0_COUNT_MAX];
++};
++
++struct fsm_f0_data {
++	uint16_t freq;
++	uint16_t zmdata;
++	uint16_t min_zm;
++};
++
++struct fsm_f0_test_data {
++	uint16_t count;
++	struct fsm_f0_data data[F0_COUNT_MAX];
++};
++
++struct fsm_cal_result {
++	int ndev;
++	uint16_t freq_start;
++	uint16_t freq_end;
++	uint16_t freq_step;
++	struct fsm_calib data[FSM_DEV_MAX];
++};
++
++struct re25_data {
++	uint16_t count;
++	uint16_t pre_val;
++	uint16_t min_val;
++	uint16_t zmdata;
++};
++
++struct f0_data {
++	uint16_t count   : 8;
++	uint16_t min_idx : 8;
++	uint16_t min_zm;
++	uint16_t freq[F0_COUNT_MAX];
++	uint16_t zmdata[F0_COUNT_MAX];
++};
++
++struct fsm_test_data {
++	struct re25_data re25;
++	struct f0_data f0;
++	int test_re25;
++	int test_f0;
++};
++
++#if !defined(CONFIG_I2C)
++struct i2c_client {
++	int addr;
++};
++#endif
++
++struct fsm_msg {
++	char *buf;
++	uint32_t size;
++};
++typedef struct fsm_msg fsm_msg_t;
++
++struct fsm_bpcoef {
++	int freq;
++	uint32_t coef[COEF_LEN];
++};
++
++struct fsm_state {
++	uint16_t dev_inited : 1;
++	uint16_t amp_mute   : 1;
++	uint16_t bypass_dsp : 1;
++	uint16_t calibrated : 1;
++	uint16_t otp_stored : 1;
++	uint16_t re25_runin : 1;
++	uint16_t f0_runing  : 1;
++};
++
++struct fsm_compat {
++	uint16_t preset_unit_len;
++	uint16_t addr_excer_ram;
++	uint16_t otp_max_count;
++	uint16_t ACSEQA  : 8;
++	uint16_t ACSEQWL : 8;
++	uint16_t DACEQA  : 8;
++	uint16_t DACEQWL : 8;
++	int RS2RL_RATIO;
++};
++
++struct fsm_dev {
++	struct i2c_client *i2c;
++#if defined(CONFIG_FSM_REGMAP)
++	struct regmap *regmap;
++#endif
++#if defined(CONFIG_FSM_STEREO)
++	struct list_head list;
++#endif
++#if defined(__KERNEL__)
++	struct workqueue_struct *fsm_wq;
++	struct delayed_work init_work;
++	struct delayed_work monitor_work;
++	struct delayed_work interrupt_work;
++	struct mutex i2c_lock;
++	int irq_id;
++#endif
++	struct fsm_ops dev_ops;
++	struct preset_file *preset;
++	struct dev_list *dev_list;
++	struct fsm_state state;
++	struct fsm_compat compat;
++	struct fsm_test_data *tdata;
++	uint16_t bus  : 8;
++	uint16_t addr : 8;
++	uint16_t version;
++	uint16_t ram_scene[FSM_EQ_RAM_MAX];
++	uint16_t own_scene;
++	uint16_t cur_scene;
++	uint16_t cal_count;
++	uint16_t tmax;
++	uint16_t tcoef;
++	uint16_t tsel;
++	uint16_t rapp;
++	uint16_t rstrim;
++	uint16_t pos_mask  : 8; // position
++	uint16_t acc_count : 8; // acc-key count
++
++	uint16_t has_codec : 1;
++	uint16_t load_fw   : 1;
++	uint16_t has_sys   : 1;
++	uint16_t use_irq   : 1;
++	uint16_t is_1894s  : 1;
++
++	int rst_gpio;
++	int irq_gpio;
++	int id;
++	int spkr;
++	int re25;
++	int f0;
++	int errcode;
++	char const *dev_name;
++};
++typedef struct fsm_dev fsm_dev_t;
++
++#endif
+diff --git a/sound/soc/codecs/foursemi/fsm_codec.c b/sound/soc/codecs/foursemi/fsm_codec.c
+new file mode 100644
+index 000000000..eb29eaa0d
+--- /dev/null
++++ b/sound/soc/codecs/foursemi/fsm_codec.c
+@@ -0,0 +1,598 @@
++/**
++ * Copyright (C) Fourier Semiconductor Inc. 2016-2020. All rights reserved.
++ * 2018-10-22 File created.
++ */
++
++#if defined(CONFIG_FSM_CODEC)
++#include "fsm_public.h"
++#include <linux/regmap.h>
++#include <linux/i2c.h>
++#include <linux/mutex.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <linux/miscdevice.h>
++#include <sound/soc.h>
++#include <sound/tlv.h>
++#include <linux/version.h>
++
++struct fsm_codec {
++	struct workqueue_struct *codec_wq;
++	struct delayed_work codec_monitor;
++};
++
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0))
++#define snd_soc_codec              snd_soc_component
++#define snd_soc_add_codec_controls snd_soc_add_component_controls
++//#define snd_soc_register_codec     devm_snd_soc_register_component=>snd_soc_register_component
++#define snd_soc_register_codec     snd_soc_register_component
++#define snd_soc_unregister_codec   snd_soc_unregister_component
++#define snd_soc_codec_driver       snd_soc_component_driver
++#define remove_ret_type void
++#define remove_ret_val
++#else
++#define remove_ret_type int
++#define remove_ret_val (0)
++#endif
++
++/* Supported rates and data formats */
++#define FSM_RATES SNDRV_PCM_RATE_8000_48000
++#define FSM_FORMATS	(SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE \
++					| SNDRV_PCM_FMTBIT_S32_LE | SNDRV_PCM_FMTBIT_S24_3LE)
++
++static const unsigned int fsm_rates[] = { 8000, 16000, 32000, 44100, 48000 };
++static const struct snd_pcm_hw_constraint_list fsm_constraints = {
++	.list = fsm_rates,
++	.count = ARRAY_SIZE(fsm_rates),
++};
++
++//+bug 537023, baoshulin@wingtech.com, 20200316,  update fs18xx add switch channel
++int fsm_angle_get(struct snd_kcontrol *kcontrol,
++			struct snd_ctl_elem_value *ucontrol)
++{
++	fsm_config_t *cfg = fsm_get_config();
++
++	if (!cfg) {
++		ucontrol->value.integer.value[0] = -1;
++		return 0;
++	}
++	pr_info("next_angle: %d", cfg->cur_angle);
++	ucontrol->value.integer.value[0] = cfg->cur_angle;
++
++	return 0;
++}
++
++int fsm_angle_put(struct snd_kcontrol *kcontrol,
++			struct snd_ctl_elem_value *ucontrol)
++{
++	int next_angle = ucontrol->value.integer.value[0];
++	pr_info("audiock next_angle: %d", next_angle);
++	fsm_stereo_flip(next_angle);
++
++	return 0;
++}
++//-bug 537023, baoshulin@wingtech.com, 20200316,  update fs18xx add switch channel
++struct fsm_codec *g_fsm_codec = NULL;
++
++static int fsm_get_scene_index(uint16_t scene)
++{
++	int index = 0;
++
++	while (scene) {
++		scene = (scene >> 1);
++		if (scene == 0) {
++			break;
++		}
++		index++;
++	}
++
++	return index;
++}
++
++int fsm_scene_get(struct snd_kcontrol *kcontrol,
++			struct snd_ctl_elem_value *ucontrol)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	int scene_index;
++
++	if (!cfg) {
++		ucontrol->value.integer.value[0] = -1;
++		return 0;
++	}
++	scene_index = fsm_get_scene_index(cfg->next_scene);
++	pr_info("next_scene: %04X, BIT(%d)", cfg->next_scene, scene_index);
++	ucontrol->value.integer.value[0] = scene_index;
++
++	return 0;
++}
++
++int fsm_scene_put(struct snd_kcontrol *kcontrol,
++			struct snd_ctl_elem_value *ucontrol)
++{
++	int next_scene = ucontrol->value.integer.value[0];
++
++	pr_info("next_scene: %d", next_scene);
++	if (next_scene < 0 || next_scene >= FSM_SCENE_MAX) {
++		next_scene = 0;
++	}
++	fsm_set_scene(next_scene);
++
++	return 0;
++}
++
++int fsm_volume_get(struct snd_kcontrol *kcontrol,
++			struct snd_ctl_elem_value *ucontrol)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	int volume;
++
++	volume = ((cfg != NULL) ? cfg->volume : FSM_VOLUME_MAX);
++	ucontrol->value.integer.value[0] = volume;
++	pr_info("volume: %ld", ucontrol->value.integer.value[0]);
++
++	return 0;
++}
++
++int fsm_volume_put(struct snd_kcontrol *kcontrol,
++			struct snd_ctl_elem_value *ucontrol)
++{
++	int volume = ucontrol->value.integer.value[0];
++
++	pr_info("volume: %d", volume);
++	fsm_set_volume(volume);
++
++	return 0;
++}
++
++int fsm_stop_get(struct snd_kcontrol *kcontrol,
++			struct snd_ctl_elem_value *ucontrol)
++{
++	fsm_config_t *cfg = fsm_get_config();
++
++	ucontrol->value.integer.value[0] = ((cfg != NULL) ? cfg->force_mute : 1);
++	pr_info("stop: %ld", ucontrol->value.integer.value[0]);
++
++	return 0;
++}
++
++int fsm_stop_put(struct snd_kcontrol *kcontrol,
++			struct snd_ctl_elem_value *ucontrol)
++{
++	int stop = ucontrol->value.integer.value[0];
++
++	pr_info("stop: %x", stop);
++
++	return 0;
++}
++
++int fsm_rotation_get(struct snd_kcontrol *kcontrol,
++			struct snd_ctl_elem_value *ucontrol)
++{
++	fsm_config_t *cfg = fsm_get_config();
++
++	ucontrol->value.integer.value[0] = ((cfg != NULL) ? cfg->cur_angle : 0);
++	pr_info("angle: %ld", ucontrol->value.integer.value[0]);
++
++	return 0;
++}
++
++int fsm_rotation_put(struct snd_kcontrol *kcontrol,
++			struct snd_ctl_elem_value *ucontrol)
++{
++	int angle = ucontrol->value.integer.value[0];
++
++	pr_info("angle: %x", angle);
++	fsm_stereo_flip(angle);
++
++	return 0;
++}
++
++int fsm_monitor_get(struct snd_kcontrol *kcontrol,
++			struct snd_ctl_elem_value *ucontrol)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	int status;
++
++	if (cfg == NULL) {
++		return -EINVAL;
++	}
++	status = (!cfg->skip_monitor && cfg->use_monitor);
++	pr_info("status: %d", status);
++	ucontrol->value.integer.value[0] = status;
++
++	return 0;
++}
++
++int fsm_monitor_put(struct snd_kcontrol *kcontrol,
++			struct snd_ctl_elem_value *ucontrol)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	int monitor_on = ucontrol->value.integer.value[0];
++
++	if (cfg == NULL) {
++		return -EINVAL;
++	}
++	monitor_on = !!monitor_on;
++	pr_info("set monitor: %s", monitor_on ? "On" : "Off");
++	cfg->use_monitor = monitor_on;
++	cfg->skip_monitor = !monitor_on;
++
++	return 0;
++}
++
++static const struct snd_kcontrol_new fsm_snd_controls[] =
++{
++	SOC_SINGLE_EXT("FSM_Scene", SND_SOC_NOPM, 0, FSM_SCENE_MAX, 0,
++			fsm_scene_get, fsm_scene_put),
++	SOC_SINGLE_EXT("FSM_Volume", SND_SOC_NOPM, 0, FSM_VOLUME_MAX, 0,
++			fsm_volume_get, fsm_volume_put),
++	SOC_SINGLE_EXT("FSM_Stop", SND_SOC_NOPM, 0, 1, 0,
++			fsm_stop_get, fsm_stop_put),
++	SOC_SINGLE_EXT("FSM_Rotation", SND_SOC_NOPM, 0, 360, 0,
++			fsm_rotation_get, fsm_rotation_put),
++	SOC_SINGLE_EXT("FSM_Monitor", SND_SOC_NOPM, 0, 1, 0,
++			fsm_monitor_get, fsm_monitor_put),
++//bug 537023, baoshulin@wingtech.com, 20200316,  update fs18xx add switch channel
++	SOC_SINGLE_EXT("FSM_Stereo_Switch", SND_SOC_NOPM, 0, FSM_ANGLE_MAX, 0,
++			fsm_angle_get, fsm_angle_put),
++};
++
++static struct snd_soc_dapm_widget fsm_dapm_widgets_common[] =
++{
++	/* Stream widgets */
++	SND_SOC_DAPM_AIF_IN("AIF IN", "AIF Playback", 0, SND_SOC_NOPM, 0, 0),
++	SND_SOC_DAPM_OUTPUT("OUTL"),
++};
++
++static const struct snd_soc_dapm_route fsm_dapm_routes_common[] =
++{
++	{ "OUTL", NULL, "AIF IN" },
++};
++
++static struct snd_soc_dapm_context *snd_soc_fsm_get_dapm(
++		struct snd_soc_codec *codec)
++{
++#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0))
++	return &codec->dapm;
++#elif (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
++	return snd_soc_codec_get_dapm(codec);
++#else
++	return snd_soc_component_to_dapm(codec);
++#endif
++}
++
++static int fsm_add_widgets(struct snd_soc_codec *codec)
++{
++	struct snd_soc_dapm_context *dapm = snd_soc_fsm_get_dapm(codec);
++
++	snd_soc_add_codec_controls(codec, fsm_snd_controls,
++				ARRAY_SIZE(fsm_snd_controls));
++	snd_soc_dapm_new_controls(dapm, fsm_dapm_widgets_common,
++				ARRAY_SIZE(fsm_dapm_widgets_common));
++	snd_soc_dapm_add_routes(dapm, fsm_dapm_routes_common,
++				ARRAY_SIZE(fsm_dapm_routes_common));
++	return 0;
++}
++
++//#if LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0)
++//static struct snd_soc_codec *snd_soc_kcontrol_codec(
++//			struct snd_kcontrol *kcontrol)
++//{
++//	return snd_kcontrol_chip(kcontrol);
++//}
++//#endif
++
++static int fsm_startup(struct snd_pcm_substream *substream,
++			struct snd_soc_dai *dai)
++{
++	int ret;
++
++	if (!substream->runtime) {
++		return 0;
++	}
++
++	ret = snd_pcm_hw_constraint_mask64(substream->runtime, \
++			SNDRV_PCM_HW_PARAM_FORMAT, FSM_FORMATS);
++	if (ret < 0) {
++		pr_err("set pcm param format fail:%d", ret);
++		return ret;
++	}
++
++	ret = snd_pcm_hw_constraint_list(substream->runtime, 0,
++			SNDRV_PCM_HW_PARAM_RATE,
++			&fsm_constraints);
++
++	return ret;
++}
++
++
++static void fsm_shutdown(struct snd_pcm_substream *substream,
++			struct snd_soc_dai *dai)
++{
++}
++
++static int fsm_set_sysclk(struct snd_soc_dai *codec_dai,
++			int clk_id, unsigned int freq, int dir)
++{
++	pr_info("freq:%d", freq);
++	return 0;
++}
++
++static int fsm_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
++{
++	int format = 0;
++	int ret = 0;
++
++	pr_debug("fmt: %X", fmt);
++	/*switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
++		case SND_SOC_DAIFMT_CBS_CFS:
++			break;
++		case SND_SOC_DAIFMT_CBM_CFM:
++		default:
++			// only supports Slave mode
++			pr_err("invalid DAI master/slave interface");
++			ret = -EINVAL;
++			break;
++	}
++
++	switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
++		case SND_SOC_DAIFMT_I2S:
++			format = 3;
++			break;
++		default:
++			pr_err("invalid dai format: %x", fmt);
++			ret = -EINVAL;
++			break;
++	}*/
++	pr_info("format:%d, ret:%d", format, ret);
++
++	return ret;
++}
++
++static int fsm_hw_params(struct snd_pcm_substream *substream,
++			struct snd_pcm_hw_params *params,
++			struct snd_soc_dai *dai)
++{
++	int bclk;
++	int srate;
++	int format;
++	int sample_size;
++	int phy_size;
++
++	format = params_format(params);
++	pr_debug("format:%X", format);
++	/*switch (format)
++	{
++	case SNDRV_PCM_FORMAT_S16_LE:
++		break;
++	case SNDRV_PCM_FORMAT_S24_LE:
++	case SNDRV_PCM_FORMAT_S24_3LE:
++	case SNDRV_PCM_FORMAT_S32_LE:
++		break;
++	}*/
++
++	srate = params_rate(params);
++	sample_size = snd_pcm_format_width(format);
++	phy_size = snd_pcm_format_physical_width(format);
++	bclk = srate * phy_size * 2;
++	fsm_set_i2s_clocks(srate, bclk);
++	pr_info("bclk:%d, srate:%d, fmt:%d, phy:%d", bclk, srate,
++			sample_size, phy_size);
++
++	return 0;
++}
++
++int fsm_set_codec_monitor(struct fsm_codec *fsm_codec, bool enable)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	if (!cfg || !fsm_codec || !fsm_codec->codec_wq) {
++		return -EINVAL;
++	}
++	if (!cfg->use_monitor) {
++		return 0;
++	}
++	if (enable) {
++		cfg->skip_monitor = false;
++		queue_delayed_work(fsm_codec->codec_wq,
++				&fsm_codec->codec_monitor, 5*HZ);
++	}
++	else {
++		cfg->skip_monitor = true;
++		if (delayed_work_pending(&fsm_codec->codec_monitor)) {
++			cancel_delayed_work_sync(&fsm_codec->codec_monitor);
++		}
++	}
++
++	return 0;
++}
++
++static void fsm_codec_monitor(struct work_struct *work)
++{
++	struct fsm_codec *fsm_codec = g_fsm_codec;
++	fsm_config_t *cfg = fsm_get_config();
++
++	if (!fsm_codec || !cfg) {
++		return;
++	}
++	if (cfg->skip_monitor) {
++		return;
++	}
++	fsm_batv_monitor();
++	/* reschedule */
++	queue_delayed_work(fsm_codec->codec_wq, &fsm_codec->codec_monitor,
++			2*HZ);
++
++}
++
++static int fsm_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
++{
++	struct fsm_codec *fsm_codec = g_fsm_codec;
++
++	if (stream != SNDRV_PCM_STREAM_PLAYBACK) {
++		pr_info("captrue stream");
++		return 0;
++	}
++
++	if (mute) {
++		fsm_set_codec_monitor(fsm_codec, false);
++		fsm_speaker_off();
++	}
++	else {
++		fsm_speaker_onn();
++
++//ExtbP200604-05364  537023, baoshulin@wingtech.com, 20200624,  close vbat monitor
++		fsm_set_codec_monitor(fsm_codec, false);
++	}
++
++	return 0;
++}
++
++#ifdef FSM_UNUSED_CODE
++static int fsm_digital_mute(struct snd_soc_dai *dai, int mute)
++{
++	return fsm_mute_stream(dai, mute, SNDRV_PCM_STREAM_PLAYBACK);
++}
++
++static int fsm_trigger(struct snd_pcm_substream *substream,
++			int cmd, struct snd_soc_dai *dai)
++{
++	switch (cmd) {
++		case SNDRV_PCM_TRIGGER_START:
++			break;
++		case SNDRV_PCM_TRIGGER_STOP:
++			break;
++		case SNDRV_PCM_TRIGGER_RESUME:
++		case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		case SNDRV_PCM_TRIGGER_SUSPEND:
++		case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++			break;
++		default:
++			return -EINVAL;
++	}
++	return 0;
++}
++#endif
++
++static const struct snd_soc_dai_ops fsm_aif_dai_ops = {
++	.startup      = fsm_startup,
++	.set_fmt      = fsm_set_fmt,
++	.set_sysclk   = fsm_set_sysclk,
++	.hw_params    = fsm_hw_params,
++	.mute_stream  = fsm_mute_stream,
++	//.digital_mute = fsm_digital_mute,
++	//.trigger      = fsm_trigger,
++	.shutdown     = fsm_shutdown,
++};
++
++static struct snd_soc_dai_driver fsm_aif_dai[] = {
++	{
++		.name = "fs18xx-aif",
++		.id = 1,
++		.playback = {
++			.stream_name = "AIF Playback",
++			.channels_min = 1,
++			.channels_max = 4,
++			.rates = FSM_RATES,
++			.formats = FSM_FORMATS,
++		},
++		.ops = &fsm_aif_dai_ops,
++		.symmetric_rate = 1,
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0)
++		.symmetric_channels = 1,
++		.symmetric_sample_bits = 1,
++#endif
++	},
++};
++
++static int fsm_codec_probe(struct snd_soc_codec *codec)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	struct fsm_codec *fsm_codec;
++	int ret;
++	pr_info("audiock fsm %s enter\n",__func__);
++	pr_info("dev_name: %s", dev_name(codec->dev));
++	if (!cfg) {
++		return -EINVAL;
++	}
++	if (fsm_set_pdev(codec->dev)) {
++		ret = fsm_firmware_init(cfg->fw_name);
++		if (ret) {
++			// firmware init fail, it will try in speaker on again
++			pr_err("firmware init fail:%d", ret);
++		}
++	}
++	ret = fsm_add_widgets(codec);
++	fsm_codec = devm_kzalloc(codec->dev, sizeof(struct fsm_codec), GFP_KERNEL);
++	if (!fsm_codec) {
++		pr_err("allocate memory fail");
++		return -EINVAL;
++	}
++	fsm_codec->codec_wq = create_singlethread_workqueue("fs16xx");
++	INIT_DELAYED_WORK(&fsm_codec->codec_monitor, fsm_codec_monitor);
++	g_fsm_codec = fsm_codec;
++	pr_info("codec registered");
++	pr_info("audiock fsm %s end\n",__func__);
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++static remove_ret_type fsm_codec_remove(struct snd_soc_codec *codec)
++{
++	struct fsm_codec *fsm_codec = g_fsm_codec;
++
++	if (fsm_codec) {
++		cancel_delayed_work_sync(&fsm_codec->codec_monitor);
++		destroy_workqueue(fsm_codec->codec_wq);
++		devm_kfree(codec->dev, fsm_codec);
++	}
++	if (codec && fsm_get_pdev() == codec->dev) {
++		fsm_firmware_deinit();
++	}
++	return remove_ret_val;
++}
++
++static struct snd_soc_codec_driver soc_codec_dev_fsm = {
++	.probe  = fsm_codec_probe,
++	.remove = fsm_codec_remove,
++};
++
++int fsm_codec_register(struct device *dev, int id)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	int size = ARRAY_SIZE(fsm_aif_dai);
++	int ret;
++	pr_info("audiock fsm %s enter\n",__func__);
++	if (!cfg || cfg->codec_inited >= size) {
++		// not support codec or codec inited
++		pr_info("audiock fsm %s not support codec or codec inited\n",__func__);
++		return MODULE_INITED;
++	}
++	pr_info("audiock fsm id:%d, size:%d", id, size);
++	if (id < 0 || id >= size) {
++		pr_err("invalid id: %d", id);
++		return -EINVAL;
++	}
++	pr_info("dev_name: %s", dev_name(dev));
++	ret = snd_soc_register_codec(dev, &soc_codec_dev_fsm,
++			&fsm_aif_dai[id], 1);
++	if (ret < 0) {
++		dev_err(dev, "failed to register CODEC DAI: %d", ret);
++		return ret;
++	}
++	cfg->codec_inited++;
++	// fsm_set_codec_config(dev, &fsm_aif_dai[id], id);
++
++	return ret;
++}
++
++void fsm_codec_unregister(struct device *dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++
++	pr_info("enter");
++	if (!cfg || !cfg->codec_inited) {
++		return;
++	}
++	snd_soc_unregister_codec(dev);
++	cfg->codec_inited--;
++}
++#endif
+diff --git a/sound/soc/codecs/foursemi/fsm_core.c b/sound/soc/codecs/foursemi/fsm_core.c
+new file mode 100644
+index 000000000..390b1c99c
+--- /dev/null
++++ b/sound/soc/codecs/foursemi/fsm_core.c
+@@ -0,0 +1,2789 @@
++/**
++ * Copyright (C) Fourier Semiconductor Inc. 2016-2020. All rights reserved.
++ * 2018-10-17 File created.
++ */
++
++#include "fsm_public.h"
++#if defined(__KERNEL__)
++#include <linux/slab.h>
++#include <linux/delay.h>
++#elif defined(FSM_HAL_SUPPORT)
++#include <unistd.h>
++#endif
++
++//bug 538153, baoshulin@wingtech.com, 20200310, add mmitest and smartpa info
++#define hardwareinfo_set_prop(id, name)	pr_info("amplifier: %s", name)
++
++#define CRC16_TABLE_SIZE      256
++#define CRC16_POLY_NOMIAL     0xA001
++#define OTP_OP_COUNTER_OFFSET 0xFF10
++
++static int fsm_skip_device(fsm_dev_t *fsm_dev);
++int fsm_stub_check_stable(fsm_dev_t *fsm_dev, int type);
++static int fsm_try_init(void);
++
++static LIST_HEAD(fsm_dev_list);
++#define fsm_list_init(fsm_dev) \
++	do { \
++		INIT_LIST_HEAD(&fsm_dev->list); \
++		list_add(&fsm_dev->list, &fsm_dev_list); \
++	} while (0)
++
++#define fsm_list_entry(fsm_dev, ops) \
++	do { \
++		list_for_each_entry(fsm_dev, &fsm_dev_list, list) { \
++			if (!fsm_skip_device(fsm_dev) && ops) { \
++				ops(fsm_dev); \
++			} \
++		} \
++	} while(0)
++
++#define fsm_list_func(fsm_dev, func) \
++	do { \
++		list_for_each_entry(fsm_dev, &fsm_dev_list, list) { \
++			if (!fsm_skip_device(fsm_dev)) { \
++				func(fsm_dev); \
++			} \
++		} \
++	} while(0)
++
++#define fsm_list_check(fsm_dev, type, ret) \
++	do { \
++		ret = 0; \
++		list_for_each_entry(fsm_dev, &fsm_dev_list, list) { \
++			if (!fsm_skip_device(fsm_dev)) { \
++				ret |= fsm_stub_check_stable(fsm_dev, type); \
++				if (ret) { \
++					break; \
++				} \
++			} \
++		} \
++	} while(0)
++
++#define fsm_list_return(fsm_dev, func, ret) \
++	do { \
++		ret = 0; \
++		list_for_each_entry(fsm_dev, &fsm_dev_list, list) { \
++			if (!fsm_skip_device(fsm_dev)) { \
++				ret |= func(fsm_dev); \
++			} \
++		} \
++	} while(0)
++
++#define fsm_list_func_arg(fsm_dev, func, argv) \
++	do { \
++		list_for_each_entry(fsm_dev, &fsm_dev_list, list) { \
++			if (!fsm_skip_device(fsm_dev)) { \
++				func(fsm_dev, argv); \
++			} \
++		} \
++	} while(0)
++
++
++static uint16_t g_crc16table[CRC16_TABLE_SIZE] = {
++	0x0000, 0xc0c1, 0xc181, 0x0140, 0xc301, 0x03c0, 0x0280, 0xc241,
++	0xc601, 0x06c0, 0x0780, 0xc741, 0x0500, 0xc5c1, 0xc481, 0x0440,
++	0xcc01, 0x0cc0, 0x0d80, 0xcd41, 0x0f00, 0xcfc1, 0xce81, 0x0e40,
++	0x0a00, 0xcac1, 0xcb81, 0x0b40, 0xc901, 0x09c0, 0x0880, 0xc841,
++	0xd801, 0x18c0, 0x1980, 0xd941, 0x1b00, 0xdbc1, 0xda81, 0x1a40,
++	0x1e00, 0xdec1, 0xdf81, 0x1f40, 0xdd01, 0x1dc0, 0x1c80, 0xdc41,
++	0x1400, 0xd4c1, 0xd581, 0x1540, 0xd701, 0x17c0, 0x1680, 0xd641,
++	0xd201, 0x12c0, 0x1380, 0xd341, 0x1100, 0xd1c1, 0xd081, 0x1040,
++	0xf001, 0x30c0, 0x3180, 0xf141, 0x3300, 0xf3c1, 0xf281, 0x3240,
++	0x3600, 0xf6c1, 0xf781, 0x3740, 0xf501, 0x35c0, 0x3480, 0xf441,
++	0x3c00, 0xfcc1, 0xfd81, 0x3d40, 0xff01, 0x3fc0, 0x3e80, 0xfe41,
++	0xfa01, 0x3ac0, 0x3b80, 0xfb41, 0x3900, 0xf9c1, 0xf881, 0x3840,
++	0x2800, 0xe8c1, 0xe981, 0x2940, 0xeb01, 0x2bc0, 0x2a80, 0xea41,
++	0xee01, 0x2ec0, 0x2f80, 0xef41, 0x2d00, 0xedc1, 0xec81, 0x2c40,
++	0xe401, 0x24c0, 0x2580, 0xe541, 0x2700, 0xe7c1, 0xe681, 0x2640,
++	0x2200, 0xe2c1, 0xe381, 0x2340, 0xe101, 0x21c0, 0x2080, 0xe041,
++	0xa001, 0x60c0, 0x6180, 0xa141, 0x6300, 0xa3c1, 0xa281, 0x6240,
++	0x6600, 0xa6c1, 0xa781, 0x6740, 0xa501, 0x65c0, 0x6480, 0xa441,
++	0x6c00, 0xacc1, 0xad81, 0x6d40, 0xaf01, 0x6fc0, 0x6e80, 0xae41,
++	0xaa01, 0x6ac0, 0x6b80, 0xab41, 0x6900, 0xa9c1, 0xa881, 0x6840,
++	0x7800, 0xb8c1, 0xb981, 0x7940, 0xbb01, 0x7bc0, 0x7a80, 0xba41,
++	0xbe01, 0x7ec0, 0x7f80, 0xbf41, 0x7d00, 0xbdc1, 0xbc81, 0x7c40,
++	0xb401, 0x74c0, 0x7580, 0xb541, 0x7700, 0xb7c1, 0xb681, 0x7640,
++	0x7200, 0xb2c1, 0xb381, 0x7340, 0xb101, 0x71c0, 0x7080, 0xb041,
++	0x5000, 0x90c1, 0x9181, 0x5140, 0x9301, 0x53c0, 0x5280, 0x9241,
++	0x9601, 0x56c0, 0x5780, 0x9741, 0x5500, 0x95c1, 0x9481, 0x5440,
++	0x9c01, 0x5cc0, 0x5d80, 0x9d41, 0x5f00, 0x9fc1, 0x9e81, 0x5e40,
++	0x5a00, 0x9ac1, 0x9b81, 0x5b40, 0x9901, 0x59c0, 0x5880, 0x9841,
++	0x8801, 0x48c0, 0x4980, 0x8941, 0x4b00, 0x8bc1, 0x8a81, 0x4a40,
++	0x4e00, 0x8ec1, 0x8f81, 0x4f40, 0x8d01, 0x4dc0, 0x4c80, 0x8c41,
++	0x4400, 0x84c1, 0x8581, 0x4540, 0x8701, 0x47c0, 0x4680, 0x8641,
++	0x8201, 0x42c0, 0x4380, 0x8341, 0x4100, 0x81c1, 0x8081, 0x4040,
++};
++
++static struct fsm_config g_fsm_config = {
++	.dev_count  = 0,
++	.volume     = FSM_VOLUME_MAX,
++	.next_scene = FSM_SCENE_MUSIC,
++	.i2s_bclk   = 1536000,
++	.i2s_srate  = 48000,
++	.test_type  = TEST_NONE,
++//ExtB P200626-05620, baoshulin@wingtech.com, 20200720, modify bootup default angle.
++	.cur_angle  = 270,
++	.next_angle = 270,
++
++	// flags
++	.vddd_on = 0,
++	.codec_inited = 0,
++	.force_fw = 0,
++	.force_init = 0,
++	.force_scene = 0,
++	.force_calib = 0,
++	.store_otp = 1,
++	.force_mute = 0,
++	.stop_test = 0,
++	.skip_monitor = 0,
++	.use_monitor = 0,
++	.stream_muted = 1,
++
++	.fw_name = FSM_FW_NAME,
++	.preset = NULL,
++};
++
++static const struct fsm_srate g_srate_tbl[] = {
++	{  8000, 0 },
++	{ 16000, 3 },
++	{ 32000, 8 },
++	{ 44100, 7 },
++	{ 48000, 8 },
++	// fs1860 support below srate:
++	{ 88200, 9 },
++	{ 96000, 10 },
++};
++static struct fsm_vbat_state g_vbat_state = { 0 };
++
++static int fsm_skip_device(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++
++	if (!fsm_dev || !cfg) {
++		return 1;
++	}
++	if (!fsm_dev->state.dev_inited) {
++		return 1;
++	}
++	if ((fsm_dev->own_scene & cfg->next_scene) == 0) {
++		return 1;
++	}
++
++	return 0;
++}
++
++static int fsm_cal_re25_zmdata(fsm_dev_t *fsm_dev,
++				struct re25_data *re25, uint16_t zmdata)
++{
++	if (!fsm_dev || !re25) {
++		return -EINVAL;
++	}
++	if (!fsm_dev->state.re25_runin) {
++		return 0;
++	}
++	if (re25->count >= 10)
++		return 0;
++
++	if (abs(re25->pre_val - zmdata) > FSM_ZMDELTA_MAX
++			|| re25->pre_val == 0) {
++		re25->zmdata = 0;
++		re25->pre_val = zmdata;
++		re25->count = 1;
++		re25->min_val = zmdata;
++	} else {
++		re25->count++;
++		if (zmdata < re25->min_val) {
++			re25->min_val = zmdata;
++		}
++	}
++	pr_addr(info, "ZM[%2d]:%d", re25->count, zmdata);
++
++	if (re25->count >= 10) {
++		// finish calibration
++		pr_addr(info, "ZM:%d", re25->min_val);
++		re25->zmdata = re25->min_val;
++		return 0;
++	}
++
++	return -EINVAL;
++}
++
++static int fsm_cal_f0_zmdata(fsm_dev_t *fsm_dev,
++				struct f0_data *f0, int freq, uint16_t zmdata)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	int count;
++
++	if (!fsm_dev || !f0 || !cfg) {
++		return -EINVAL;
++	}
++	if (!fsm_dev->state.f0_runing) {
++		return 0;
++	}
++	count = f0->count;
++	pr_addr(info, "ZM[%4d]:%d", freq, zmdata);
++	f0->freq[count] = freq;
++	f0->zmdata[count] = zmdata;
++	if (f0->count == 0 || zmdata < f0->min_zm) {
++		f0->min_zm = zmdata;
++		f0->min_idx = f0->count;
++		fsm_dev->f0 = freq;
++	}
++	f0->count++;
++
++	return 0;
++}
++
++static int fsm_cal_zmdata(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	uint16_t zmdata;
++	int ret;
++
++	if (!fsm_dev || !cfg) {
++		return -EINVAL;
++	}
++	if (fsm_skip_device(fsm_dev)) {
++		return 0;
++	}
++	ret = fsm_reg_multiread(fsm_dev, REG(FSM_ZMDATA), &zmdata);
++	if (ret) {
++		pr_addr(err, "get zmdata fail:%d", ret);
++		return -EINVAL;
++	}
++	if (!fsm_dev->tdata) {
++		fsm_dev->tdata = fsm_alloc_mem(sizeof(struct fsm_test_data));
++		if (!fsm_dev->tdata) {
++			pr_addr(err, "alloc test data fail");
++			return -EINVAL;
++		}
++		memset(fsm_dev->tdata, 0, sizeof(struct fsm_test_data));
++	}
++	if (cfg->test_type == TEST_RE25) {
++		ret = fsm_cal_re25_zmdata(fsm_dev, &fsm_dev->tdata->re25, zmdata);
++	}
++	else if(cfg->test_type == TEST_F0) {
++		ret = fsm_cal_f0_zmdata(fsm_dev, &fsm_dev->tdata->f0,
++			cfg->test_freq, zmdata);
++	}
++	else {
++		pr_addr(err, "invalid test type:%d", cfg->test_type);
++		ret = -EINVAL;
++	}
++
++	return ret;
++}
++
++static int fsm_list_wait(int type)
++{
++	fsm_dev_t *fsm_dev = NULL;
++	int retry;
++	int ret;
++
++	for (retry = 1; retry <= FSM_WAIT_STABLE_RETRY; retry++) {
++		fsm_delay_ms(2);
++		fsm_list_check(fsm_dev, type, ret);
++		if (!ret) {
++			break;
++		}
++	}
++	if (retry > FSM_WAIT_STABLE_RETRY) {
++		pr_err("type:%d, wait timeout!", type);
++	}
++	pr_debug("type:%d, wait %d times", type, retry);
++
++	return ret;
++}
++
++int zero_bit_counter(uint8_t byte)
++{
++	int count = 0;
++
++	byte = ~byte;
++	while(byte) {
++		byte &= byte - 1;
++		++count;
++	}
++	return count;
++}
++
++int get_otp_counter(uint16_t byte)
++{
++	// OTP offset start from 0x10 to 0x20(Totally 16)
++	if (byte == OTP_OP_COUNTER_OFFSET) {
++		return 0;
++	}
++	return (LOW8(byte) - LOW8(OTP_OP_COUNTER_OFFSET) + 1);
++}
++
++void convert_data_to_bytes(uint32_t val, uint8_t *buf)
++{
++	buf[0] = (val >> 8) & 0xFF;
++	buf[1] = (val) & 0xFF;
++	buf[2] = (val >> 24) & 0xFF;
++	buf[3] = (val >> 16) & 0xFF;
++}
++
++fsm_config_t *fsm_get_config(void)
++{
++	return &g_fsm_config;
++}
++// EXPORT_SYMBOL(fsm_get_config);
++
++void fsm_get_version(fsm_version_t *version)
++{
++	sprintf(version->git_branch, "%s", FSM_GIT_BRANCH);
++	sprintf(version->git_commit, "%s", FSM_GIT_COMMIT);
++	sprintf(version->code_date, "%s", FSM_CODE_DATE);
++	sprintf(version->code_version, "%s", FSM_CODE_VERSION);
++	pr_info("version %s", version->code_version);
++}
++
++void *fsm_alloc_mem(int size)
++{
++#if defined(__KERNEL__)
++	return kzalloc(size, GFP_KERNEL);
++#elif defined(FSM_HAL_SUPPORT)
++	return malloc(size);
++#else
++	return NULL;
++#endif
++}
++
++void fsm_free_mem(void *buf)
++{
++	if (buf == NULL) {
++		return;
++	}
++
++#if defined(__KERNEL__)
++	kfree(buf);
++#elif defined(FSM_HAL_SUPPORT)
++	free(buf);
++#endif
++	buf = NULL;
++}
++
++void fsm_delay_ms(uint32_t delay_ms)
++{
++	if (delay_ms == 0) {
++		return;
++	}
++#if defined(__KERNEL__)
++	usleep_range(delay_ms * 1000, delay_ms * 1000 + 1);
++#elif defined(FSM_HAL_SUPPORT)
++	usleep(delay_ms * 1000);
++#endif
++}
++
++uint16_t set_bf_val(uint16_t *pval, const uint16_t bf, const uint16_t bf_val)
++{
++	uint8_t len = (bf >> 12) & 0x0F;
++	uint8_t pos = (bf >> 8) & 0x0F;
++	uint16_t new_val;
++	uint16_t old_val;
++	uint16_t msk;
++
++	if (!pval) {
++		return 0xFFFF;
++	}
++	old_val = new_val = *pval;
++	msk = ((1 << (len + 1)) - 1) << pos;
++	new_val &= ~msk;
++	new_val |= bf_val << pos;
++	*pval = new_val;
++
++	return old_val;
++}
++
++uint16_t get_bf_val(const uint16_t bf, const uint16_t val)
++{
++	uint8_t len = (bf >> 12) & 0x0F;
++	uint8_t pos = (bf >> 8) & 0x0F;
++	uint16_t msk, value;
++
++	msk = ((1 << (len + 1)) - 1) << pos;
++	value = (val & msk) >> pos;
++
++	return value;
++}
++
++int fsm_set_bf(fsm_dev_t *fsm_dev, const uint16_t bf, const uint16_t val)
++{
++	reg_unit_t reg;
++	uint16_t oldval;
++	uint16_t msk;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	reg.len = (bf >> 12) & 0x0F;
++	reg.pos = (bf >> 8) & 0x0F;
++	reg.addr = bf & 0xFF;
++	if (reg.len == 15) {
++		return fsm_reg_write(fsm_dev, reg.addr, val);
++	}
++	ret = fsm_reg_read(fsm_dev, reg.addr, &oldval);
++	if (ret) {
++		pr_err("get bf:%04X failed", bf);
++		return ret;
++	}
++
++	msk = ((1 << (reg.len + 1)) - 1) << reg.pos;
++	reg.value = oldval & (~msk);
++	reg.value |= val << reg.pos;
++
++	if(oldval == reg.value) {
++		return 0;
++	}
++	ret = fsm_reg_write(fsm_dev, reg.addr, reg.value);
++	if (ret) {
++		pr_err("set bf:%04X failed", bf);
++		return ret;
++	}
++
++	return ret;
++}
++
++int fsm_get_bf(fsm_dev_t *fsm_dev, const uint16_t bf, uint16_t *pval)
++{
++	reg_unit_t reg;
++	uint16_t msk;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	reg.len = (bf >> 12) & 0x0F;
++	reg.pos = (bf >> 8) & 0x0F;
++	reg.addr = bf & 0xFF;
++	ret = fsm_reg_multiread(fsm_dev, reg.addr, &reg.value);
++	if (ret) {
++		pr_err("get bf:%04X failed", bf);
++		return ret;
++	}
++	msk = ((1 << (reg.len + 1)) - 1) << reg.pos;
++	reg.value &= msk;
++	if(pval) {
++		*pval = reg.value >> reg.pos;
++	}
++
++	return ret;
++}
++
++struct fsm_dev *fsm_get_fsm_dev(uint8_t addr)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	fsm_dev_t *fsm_dev;
++
++	if (!cfg || cfg->dev_count <= 0) {
++		return NULL;
++	}
++
++	list_for_each_entry(fsm_dev, &fsm_dev_list, list) {
++		if (fsm_dev && addr == fsm_dev->addr) {
++			return fsm_dev;
++		}
++	}
++
++	return NULL;
++}
++
++int fsm_reg_write(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t val)
++{
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++#if defined(FSM_DEBUG_I2C)
++	pr_addr(info, "%02X<-%04X", reg, val);
++#endif
++#if defined(CONFIG_FSM_REGMAP)
++	ret = fsm_regmap_write(fsm_dev, reg, val);
++#elif defined(CONFIG_FSM_I2C)
++	ret = fsm_i2c_reg_write(fsm_dev, reg, val);
++#elif defined(FSM_HAL_SUPPORT)
++	ret = fsm_hal_reg_write(fsm_dev, reg, val);
++#else
++	ret = -EINVAL;
++#endif
++	if (ret) {
++		pr_addr(err, "%02X<-%04X fail:%d", reg, val, ret);
++	}
++
++	return ret;
++}
++
++int fsm_reg_read(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t *pval)
++{
++	uint16_t value;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++#if defined(CONFIG_FSM_REGMAP)
++	ret = fsm_regmap_read(fsm_dev, reg, &value);
++#elif defined(CONFIG_FSM_I2C)
++	ret = fsm_i2c_reg_read(fsm_dev, reg, &value);
++#elif defined(FSM_HAL_SUPPORT)
++	ret = fsm_hal_reg_read(fsm_dev, reg, &value);
++#else
++	ret = -EINVAL;
++#endif
++#if defined(FSM_DEBUG_I2C)
++	pr_addr(info, " %02X->%04X", reg, value);
++#endif
++	if (ret) {
++		value = 0;
++		pr_addr(err, " %02X->%04X fail:%d", reg, value, ret);
++	}
++	if (pval) {
++		*pval = value;
++	}
++
++	return ret;
++}
++
++int fsm_burst_write(fsm_dev_t *fsm_dev, uint8_t reg, uint8_t *data, int len)
++{
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++#if defined(FSM_DEBUG_I2C)
++	if (len >= 4) {
++		pr_addr(info, "%02X<-%02X %02X %02X %02X", reg,
++				data[0], data[1], data[2], data[3]);
++	}
++	// logprint("%s: %02X: %02X<-", __func__, fsm_dev->addr, reg);
++	// for (ret = 0; ret < len; ret++) {
++	// logprint("%02X ", data[ret]);
++	// }
++	// logprint("\n");
++#endif
++
++#if defined(CONFIG_FSM_REGMAP)
++	ret = fsm_regmap_bulkwrite(fsm_dev, reg, data, len);
++#elif defined(CONFIG_FSM_I2C)
++	ret = fsm_i2c_bulkwrite(fsm_dev, reg, data, len);
++#elif defined(FSM_HAL_SUPPORT)
++	ret = fsm_hal_bulkwrite(fsm_dev, reg, data, len);
++#else
++	ret = -EINVAL;
++#endif
++	if (ret) {
++		pr_addr(err, "BW %02X fail:%d", reg, ret);
++	}
++
++	return ret;
++}
++
++int fsm_reg_update_bits(fsm_dev_t *fsm_dev, reg_unit_t *reg)
++{
++	uint16_t temp;
++	uint16_t mask;
++	uint16_t val;
++	uint8_t addr;
++	int ret;
++
++	if (!fsm_dev || !reg) {
++		return -EINVAL;
++	}
++	addr = reg->addr;
++	if (addr == REG(FSM_OTPACC)) {
++		if (reg->value == 0 && fsm_dev->acc_count > 0) {
++			fsm_dev->acc_count--;
++		}
++		if (reg->value != 0 && fsm_dev->acc_count < 0xFF) {
++			fsm_dev->acc_count++;
++		}
++	}
++	if (reg->pos == 0 && reg->len == 15) {
++		return fsm_reg_write(fsm_dev, addr, reg->value);
++	}
++	mask = ((1 << (reg->len + 1)) - 1) << reg->pos;
++	val = (reg->value << reg->pos);
++	ret = fsm_reg_read(fsm_dev, addr, &temp);
++	temp = ((~mask & temp) | (val & mask));
++	ret |= fsm_reg_write(fsm_dev, addr, temp);
++
++	return ret;
++}
++
++int fsm_reg_update(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t val)
++{
++	uint16_t temp;
++	int ret;
++
++#if defined(FSM_DEBUG_I2C)
++	pr_addr(info, "%02X<-%04X", reg, val);
++#endif
++	ret = fsm_reg_read(fsm_dev, reg, &temp);
++	if (!ret && temp != val) {
++		ret = fsm_reg_write(fsm_dev, reg, val);
++	}
++	if (ret) {
++		pr_addr(err, "update reg:%02X failed:%d", reg, ret);
++	}
++
++	return ret;
++}
++
++int fsm_reg_multiread(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t *pval)
++{
++	uint16_t value;
++	uint16_t old;
++	int count = 0;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	while (count++ < FSM_I2C_RETRY) {
++		ret = fsm_reg_read(fsm_dev, reg, &value);
++		if (ret)
++			continue;
++		if (count > 1 && old == value) {
++			break;
++		}
++		old = value;
++	}
++	if (ret) {
++		value = 0;
++#if !defined(BUILD_FSTOOL)
++		pr_addr(err, " %02X->%04X fail:%d", reg, value, ret);
++#endif
++	}
++	if (pval) {
++		*pval = value;
++	}
++
++	return ret;
++}
++
++uint16_t fsm_calc_checksum(uint16_t *data, int len)
++{
++	uint16_t crc = 0;
++	uint8_t index;
++	uint8_t b;
++	int i;
++
++	if (len <= 0) {
++		return 0;
++	}
++
++	for (i = 0; i < len; i++) {
++		b = (uint8_t)(data[i] & 0xFF);
++		index = (uint8_t)(crc ^ b);
++		crc = (uint16_t)((crc >> 8) ^ g_crc16table[index]);
++		b = (uint8_t)((data[i] >> 8) & 0xFF);
++		index = (uint8_t)(crc ^ b);
++		crc = (uint16_t)((crc >> 8) ^ g_crc16table[index]);
++	}
++	return crc;
++}
++
++int fsm_get_srate_bits(fsm_dev_t *fsm_dev, uint32_t srate)
++{
++	int size;
++	int idx;
++
++	if (srate > 48000 && HIGH8(fsm_dev->version) != FS1860_DEV_ID) {
++		pr_addr(err, "invalid srate:%d", srate);
++		return -EINVAL;
++	}
++	size = sizeof(g_srate_tbl)/ sizeof(struct fsm_srate);
++	for (idx = 0; idx < size; idx++) {
++		if (srate == g_srate_tbl[idx].srate)
++			return g_srate_tbl[idx].bf_val;
++	}
++	return -EINVAL;
++}
++
++int fsm_access_key(fsm_dev_t *fsm_dev, int access)
++{
++	int ret = 0;
++
++	if (!fsm_dev) {
++		return -EINVAL;
++	}
++	if (access) {
++		if (fsm_dev->acc_count == 0) {
++			ret = fsm_reg_write(fsm_dev, REG(FSM_OTPACC), FSM_OTP_ACC_KEY2);
++			fsm_dev->acc_count = !ret ? 1 : 0;
++		}
++		else if (fsm_dev->acc_count < 0xFF) {
++			fsm_dev->acc_count++;
++		}
++	}
++	else {
++		if (fsm_dev->acc_count == 1) {
++			ret = fsm_reg_write(fsm_dev, REG(FSM_OTPACC), 0);
++			fsm_dev->acc_count = !ret ? 0 : 1;
++		}
++		else if (fsm_dev->acc_count > 0) {
++			fsm_dev->acc_count--;
++		}
++	}
++	// pr_addr(debug, "acc:%d, count:%d", access, fsm_dev->acc_count);
++
++	return ret;
++}
++
++int fsm_reg_dump(fsm_dev_t *fsm_dev)
++{
++	uint16_t value;
++	int reg_addr;
++	int ret;
++
++	logprint("%s: %02X: ", __func__, fsm_dev->addr);
++	ret = fsm_access_key(fsm_dev, 1);
++	for (reg_addr = 0; reg_addr < 0xFF; reg_addr++) {
++		if (reg_addr == 0x0C) reg_addr = 0x89;
++		else if (reg_addr == 0x8A) reg_addr = 0xA1;
++		else if (reg_addr == 0xA2) reg_addr = 0xAF;
++		else if (reg_addr == 0xB0) reg_addr = 0xBB;
++		else if (reg_addr == 0xBC) reg_addr = 0xC0;
++		else if (reg_addr == 0xC5) reg_addr = 0xC9;
++		else if (reg_addr == 0xD0) reg_addr = 0xE8;
++		ret |= fsm_reg_read(fsm_dev, reg_addr, &value);
++		logprint("%02X:%04X ", reg_addr, value);
++		if (reg_addr == 0xE8) {
++			break;
++		}
++	}
++	ret |= fsm_access_key(fsm_dev, 0);
++	logprint("\n");
++
++	return ret;
++}
++
++static int fsm_search_list(fsm_dev_t *fsm_dev, struct preset_file *pfile)
++{
++	dev_list_t *dev_list;
++	uint8_t *preset;
++	uint16_t offset;
++	uint16_t type;
++	int idx;
++
++	preset = (uint8_t *)pfile;
++	for (idx = 0; idx < pfile->hdr.ndev; idx++) {
++		type = pfile->index[idx].type;
++		if (FSM_DSC_DEV_INFO != type) {
++			continue;
++		}
++		offset = pfile->index[idx].offset;
++		pr_addr(debug, "offset[%d]: %d", idx, offset);
++		dev_list = (struct dev_list *)&preset[offset];
++		if (fsm_dev->addr == dev_list->addr) {
++			pr_addr(info, "found dev_list");
++			fsm_dev->dev_list = dev_list;
++			break;
++		}
++	}
++	if (idx == pfile->hdr.ndev) {
++		pr_addr(err, "not found dev_list");
++		fsm_dev->dev_list = NULL;
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static int fsm_check_dev_type(fsm_dev_t *fsm_dev)
++{
++	uint16_t dev_type;
++
++	if (!fsm_dev || !fsm_dev->dev_list) {
++		pr_addr(err, "bad parameter");
++		return -EINVAL;
++	}
++	dev_type = fsm_dev->dev_list->dev_type;
++	if (HIGH8(fsm_dev->version) == 0x06 || HIGH8(fsm_dev->version) == 0x0B) {
++		// fs1801 series
++		if (HIGH8(dev_type) != 0x0A) {
++			return -EINVAL;
++		}
++		return 0;
++	}
++	// other series
++	if (HIGH8(fsm_dev->version) != HIGH8(dev_type)) {
++		pr_addr(err, "type:%02X not match version:%02X",
++				HIGH8(dev_type), HIGH8(fsm_dev->version));
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++int fsm_init_dev_list(fsm_dev_t *fsm_dev)
++{
++	struct preset_file *pfile;
++	dev_list_t *dev_list;
++	int ret;
++
++	pfile = fsm_get_presets();
++	if (!fsm_dev || !pfile) {
++		pr_addr(err, "bad parameter or invalid FW");
++		return -EINVAL;
++	}
++
++	pr_addr(debug, "ndev:%d", pfile->hdr.ndev);
++	ret = fsm_search_list(fsm_dev, pfile);
++	if (ret) {
++		return ret;
++	}
++	dev_list = fsm_dev->dev_list;
++	// assert(dev_list != NULL);
++	ret = fsm_check_dev_type(fsm_dev);
++	if (ret) {
++		pr_addr(err, "type(%04X) not matched version(%04X)",
++				dev_list->dev_type, fsm_dev->version);
++		fsm_dev->dev_list = NULL;
++		return ret;
++	}
++	pr_addr(info, "preset ver:%04X", dev_list->preset_ver);
++	if ((dev_list->preset_ver & BIT(15)) == 0) { // BIT_15 must be 1
++		pr_addr(err, "invalid preset version:%04X",
++				dev_list->preset_ver);
++		return -EINVAL;
++	}
++	pr_addr(debug, "bus  : %d, len: %d",
++		dev_list->bus, dev_list->len);
++	pr_addr(debug, "type : %04X, npreset: %d",
++		dev_list->dev_type, dev_list->npreset);
++	pr_addr(debug, "scene: eq:%04X, reg:%04X",
++		dev_list->eq_scenes, dev_list->reg_scenes);
++	fsm_dev->own_scene = dev_list->reg_scenes | dev_list->eq_scenes;
++
++	return 0;
++}
++
++void *fsm_get_list_by_idx(fsm_dev_t *fsm_dev, int idx)
++{
++	dev_list_t *dev_list;
++	fsm_index_t *index;
++	uint8_t *pdata;
++
++	if (fsm_dev == NULL) {
++		return NULL;
++	}
++	dev_list = fsm_dev->dev_list;
++	if (dev_list == NULL) {
++		return NULL;
++	}
++	index = &dev_list->index[0];
++	pdata = (uint8_t *)index;
++
++	return (void *)(&pdata[index[idx].offset]);
++}
++
++void *fsm_get_data_list(fsm_dev_t *fsm_dev, int type)
++{
++	dev_list_t *dev_list;
++	fsm_index_t *index;
++	int i;
++
++	if (fsm_dev == NULL || fsm_dev->dev_list == NULL) {
++		return NULL;
++	}
++	dev_list = fsm_dev->dev_list;
++	index = dev_list->index;
++	if (index == NULL) {
++		return NULL;
++	}
++	for (i = 0; i < dev_list->len; i++) {
++		if (index[i].type == type) {
++			break;
++		}
++	}
++	if (i >= dev_list->len) {
++		return NULL;
++	}
++
++	return (void *)((uint8_t *)index + index[i].offset);
++}
++
++int fsm_get_spk_info(fsm_dev_t *fsm_dev, uint16_t info_type)
++{
++	info_list_t *info;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	info = (info_list_t *)fsm_get_data_list(fsm_dev, FSM_DSC_SPK_INFO);
++	if (!info || info_type > info->len) {
++		return -EINVAL;
++	}
++	// pr_addr(debug, "spk info len: %d", info->len);
++
++	return info->data[info_type];
++}
++
++int fsm_init_info(fsm_dev_t *fsm_dev)
++{
++	if (!fsm_dev || !fsm_dev->dev_list) {
++		return -EINVAL;
++	}
++	fsm_dev->bus = fsm_dev->dev_list->bus;
++	fsm_dev->addr = fsm_dev->dev_list->addr;
++	fsm_dev->tmax = fsm_get_spk_info(fsm_dev, FSM_INFO_SPK_TMAX);
++	fsm_dev->tcoef = fsm_get_spk_info(fsm_dev, FSM_INFO_SPK_TEMPR_COEF);
++	fsm_dev->tsel = fsm_get_spk_info(fsm_dev, FSM_INFO_SPK_TEMPR_SEL);
++	pr_addr(info, "tmax:%d, tcoef:%d, tsel:%d",
++		fsm_dev->tmax, fsm_dev->tcoef, fsm_dev->tsel);
++	fsm_dev->spkr = fsm_get_spk_info(fsm_dev, FSM_INFO_SPK_RES);
++	fsm_dev->rapp = fsm_get_spk_info(fsm_dev, FSM_INFO_SPK_RAPP);
++	if (IS_PRESET_V3(fsm_dev->dev_list->preset_ver)) {
++		fsm_dev->pos_mask = fsm_get_spk_info(fsm_dev, FSM_INFO_SPK_POSITION);
++		fsm_dev->compat.RS2RL_RATIO = \
++				fsm_get_spk_info(fsm_dev, FSM_INFO_RSRL_RATIO);
++	}
++	pr_addr(info, "pos:%02X, rs_ratio:%d",
++		fsm_dev->pos_mask, fsm_dev->compat.RS2RL_RATIO);
++	pr_addr(info, "spkr:%d, rapp:%d",
++		fsm_dev->spkr, fsm_dev->rapp);
++
++	return 0;
++}
++
++//bug 538153, baoshulin@wingtech.com, 20200310, add mmitest and smartpa info
++void fsm_firmware_show(uint16_t id)
++{
++    char  fsm_name[10] ="";
++    int chipid = id >>8;
++    int chipver = id & 0xff;
++    if(0x06 == chipid && chipver > 0)
++    {
++        snprintf(fsm_name,sizeof(fsm_name),"FS1818U");
++        hardwareinfo_set_prop(HARDWARE_SMARTPA, fsm_name);
++        return;
++    }
++    pr_err("%s fsm id:0x%x  chipid:0x%x chipver:0x%x",__func__,id,chipid,chipver);
++    hardwareinfo_set_prop(HARDWARE_SMARTPA,"unknown");
++}
++EXPORT_SYMBOL(fsm_firmware_show);
++
++struct preset_file *fsm_get_presets(void)
++{
++	return g_fsm_config.preset;
++
++}
++
++void fsm_set_presets(struct preset_file *file)
++{
++	fsm_config_t *cfg = fsm_get_config();
++
++	if (cfg) {
++		fsm_free_mem(cfg->preset);
++		cfg->preset = file;
++	}
++
++}
++
++/**
++ * fsm device interface for external reference
++ */
++
++int fsm_parse_preset(const void *data, uint32_t size)
++{
++	struct preset_file *pfile;
++	struct preset_header *hdr;
++	uint16_t checksum;
++	int crc_size;
++
++	if (data == NULL || size == 0) {
++		pr_err("bad parameter, size:%d", size);
++		return -EINVAL;
++	}
++	pfile = fsm_get_presets();
++	if (pfile) {
++		pr_debug("already had presets, try init");
++		fsm_try_init();
++		return 0;
++	}
++	pfile = (struct preset_file *)fsm_alloc_mem(size);
++	if (!pfile) {
++		pr_err("alloc memery failed");
++		return -ENOMEM;
++	}
++	memcpy(pfile, data, size);
++
++	hdr = &pfile->hdr;
++	pr_debug("version : %04X", hdr->version);
++	pr_info("customer: %s", hdr->customer);
++	pr_info("project : %s", hdr->project);
++	pr_info("date    : %4d%02d%02d-%02d%02d", hdr->date.year, \
++		hdr->date.month, hdr->date.day, hdr->date.hour, hdr->date.min);
++	pr_debug("size    : %d", hdr->size);
++	pr_debug("crc16   : %04X", hdr->crc16);
++
++	crc_size = (size - sizeof(struct preset_header) + 2)/sizeof(uint16_t);
++	if (hdr->size == 0 || hdr->size != size) {
++		pr_err("invalid size: hdr:%d, fw:%d", hdr->size, size);
++		return -EINVAL;
++	}
++	checksum = fsm_calc_checksum((uint16_t *)(&(pfile->hdr.ndev)), crc_size);
++	if (checksum != hdr->crc16) {
++		pr_err("checksum(%04X) not match(%04X)", checksum, hdr->crc16);
++		return -EINVAL;
++	}
++	else {
++		pr_info("checksum success!");
++		fsm_set_presets(pfile);
++	}
++	fsm_try_init();
++
++	return 0;
++}
++
++int fsm_swap_channel(fsm_dev_t *fsm_dev, int next_angle)
++{
++	uint16_t left_chn;
++	uint16_t i2sctrl;
++	uint16_t chs12;
++	int ret;
++
++	if (!fsm_dev) {
++		return -EINVAL;
++	}
++	switch (next_angle) {
++	case 270:
++		left_chn = (FSM_POS_LBTM | FSM_POS_RBTM);
++		break;
++	case 180:
++		left_chn = (FSM_POS_RTOP | FSM_POS_RBTM);
++		break;
++	case 90:
++		left_chn = (FSM_POS_LTOP | FSM_POS_RTOP);
++		break;
++	case 0:
++	default:
++		left_chn = (FSM_POS_LTOP | FSM_POS_LBTM);
++		break;
++	}
++	left_chn = (left_chn & fsm_dev->pos_mask);
++	chs12 = ((left_chn != 0) ? 1 : 2);
++	if (fsm_dev->pos_mask == FSM_POS_MONO) {
++		chs12 = 3;
++	}
++	ret = fsm_reg_read(fsm_dev, REG(FSM_I2SCTRL), &i2sctrl);
++	if(get_bf_val(FSM_CHS12, i2sctrl) == chs12) {
++		return ret;
++	}
++	ret |= fsm_set_bf(fsm_dev, FSM_DACMUTE, 1);
++	set_bf_val(&i2sctrl, FSM_CHS12, chs12);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_I2SCTRL), i2sctrl);
++	fsm_delay_ms(10);
++	pr_addr(debug, "pos:%02X, CHS12:%d", fsm_dev->pos_mask, chs12);
++	ret = fsm_set_bf(fsm_dev, FSM_DACMUTE, 0);
++
++	return ret;
++}
++
++int fsm_wait_stable(fsm_dev_t *fsm_dev, int type)
++{
++	int retries = FSM_WAIT_STABLE_RETRY;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	if (fsm_skip_device(fsm_dev)) {
++		return 0;
++	}
++	// fsm_delay_ms(10);
++	while (retries-- > 0) {
++		fsm_delay_ms(5); // delay 5 ms
++		ret = fsm_stub_check_stable(fsm_dev, type);
++		if (!ret)
++			break;
++	}
++	if (retries <= 0) {
++		pr_addr(err, "type: %d, wait timeout!", type);
++		return -ETIMEDOUT;
++	}
++	return 0;
++}
++
++int fsm_set_spkset(fsm_dev_t *fsm_dev)
++{
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	switch (fsm_dev->spkr) {
++	case 4:
++		ret = fsm_set_bf(fsm_dev, FSM_SPKR, 0);
++		break;
++	case 6:
++		ret = fsm_set_bf(fsm_dev, FSM_SPKR, 1);
++		break;
++	case 7:
++		ret = fsm_set_bf(fsm_dev, FSM_SPKR, 2);
++		break;
++	case 8:
++	default:
++		ret = fsm_set_bf(fsm_dev, FSM_SPKR, 3);
++		break;
++	}
++
++	return ret;
++}
++
++int fsm_read_vbat(fsm_dev_t *fsm_dev, uint16_t *vbat)
++{
++	uint16_t batv;
++	uint8_t ver;
++	int ret;
++
++	if (fsm_dev == NULL || !vbat) {
++		return -EINVAL;
++	}
++	// multiread in get_bf
++	ret = fsm_get_bf(fsm_dev, FSM_BATV, &batv);
++	if (ret) {
++		pr_addr(err, "get batv fail:%d", ret);
++		return ret;
++	}
++	ver = HIGH8(fsm_dev->version);
++	switch (ver) {
++	case FS1601S_DEV_ID:
++	case FS1603_DEV_ID:
++		*vbat = 10 * batv; // 10 mV per step
++		break;
++	case FS1818_DEV_ID:
++	case FS1896_DEV_ID:
++	case FS1860_DEV_ID:
++		*vbat = 50 * batv / 4; // 50/4 mV per step
++		break;
++	default:
++		pr_addr(err, "invalid dev_id:%02X", ver);
++		return -EINVAL;
++	}
++
++	return ret;
++}
++
++int fsm_get_vbat(fsm_dev_t *fsm_dev)
++{
++	struct fsm_vbat_state *vbat_state = &g_vbat_state;
++	fsm_config_t *cfg = fsm_get_config();
++	uint16_t batv;
++	int ret;
++
++	if (!cfg || fsm_dev == NULL || !vbat_state) {
++		return -EINVAL;
++	}
++	ret = fsm_read_vbat(fsm_dev, &batv);
++	if (ret) {
++		return ret;
++	}
++	// pr_addr(info, "batv:%d", batv);
++	// get min batv of all devices
++	if (vbat_state->cur_batv == 0 || batv < vbat_state->cur_batv) {
++		vbat_state->cur_batv = batv;
++	}
++
++	return ret;
++}
++
++int fsm_write_stereo_ceof(fsm_dev_t *fsm_dev)
++{
++	stereo_coef_t *stereo_coef;
++	int ret = 0;
++	int i;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	stereo_coef = (stereo_coef_t *)fsm_get_data_list(fsm_dev, FSM_DSC_STEREO_COEF);
++	if (!stereo_coef) {
++		pr_addr(info, "note: not found data");
++		return 0;
++	}
++	pr_addr(debug, "stereo coef len: %d", stereo_coef->len);
++	for (i = 0; i < stereo_coef->len - 2; i++) {
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_STERC1) + i, stereo_coef->data[i]);
++	}
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_STERCTRL), stereo_coef->data[i++]);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_STERGAIN), stereo_coef->data[i++]);
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++int fsm_write_excer_ram(fsm_dev_t *fsm_dev)
++{
++	ram_data_t *excer_ram;
++	uint8_t write_buf[4];
++	int count;
++	int ret;
++	int i;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	excer_ram = fsm_get_data_list(fsm_dev, FSM_DSC_EXCER_RAM);
++	if (!excer_ram) {
++		pr_addr(err, "note: not found data");
++		return -EINVAL;
++	}
++	count = excer_ram->len;
++	pr_addr(debug, "excer ram len: %d", count);
++	ret = fsm_reg_write(fsm_dev, fsm_dev->compat.DACEQA,
++			fsm_dev->compat.addr_excer_ram);
++	for (i = 0; i < count; i++) {
++		convert_data_to_bytes(excer_ram->data[i], write_buf);
++		ret |= fsm_burst_write(fsm_dev, fsm_dev->compat.DACEQWL,
++				write_buf, sizeof(uint32_t));
++	}
++
++	return ret;
++}
++
++int fsm_write_reg_tbl(fsm_dev_t *fsm_dev, uint16_t scene)
++{
++	reg_scene_t *reg_scene;
++	reg_comm_t *reg_comm;
++	reg_unit_t *reg;
++	regs_unit_t *regs;
++	int ret = 0;
++	int i;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	if (scene == FSM_SCENE_COMMON) {
++		reg_comm = fsm_get_data_list(fsm_dev, FSM_DSC_REG_COMMON);
++		if (!reg_comm) {
++			pr_addr(info, "note: not found reg_common data");
++			return 0;
++		}
++		reg = reg_comm->reg;
++		pr_addr(debug, "reg comm len: %d", reg_comm->len);
++		for (i = 0; i < reg_comm->len; i++) {
++			ret |= fsm_reg_update_bits(fsm_dev, &reg[i]);
++		}
++	} else if (scene != FSM_SCENE_UNKNOW) {
++		reg_scene = fsm_get_data_list(fsm_dev, FSM_DSC_REG_SCENES);
++		if (!reg_scene) {
++			pr_addr(info, "note: not found reg_scene data");
++			return 0;
++		}
++		regs = reg_scene->regs;
++		pr_addr(debug, "reg scene len: %d", reg_scene->len);
++		for (i = 0; i < reg_scene->len; i++) {
++			if ((regs[i].scene & scene) == 0) {
++				continue;
++			}
++			ret |= fsm_reg_update_bits(fsm_dev, &regs[i].reg);
++		}
++	}
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++static int parse_otp_write_count(fsm_dev_t *fsm_dev, uint16_t valOTP)
++{
++	uint16_t count = 0;
++	uint8_t devid;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	devid = HIGH8(fsm_dev->version);
++	switch (devid) {
++	case FS1603_DEV_ID:
++		count = zero_bit_counter(valOTP & 0xFF);
++		break;
++	case FS1818_DEV_ID:
++	case FS1896_DEV_ID:
++		count = get_otp_counter(valOTP);
++		break;
++	default:
++		pr_addr(err, "invalid DEVID:%02X", devid);
++		break;
++	}
++	return count;
++}
++
++int fsm_write_preset_eq(fsm_dev_t *fsm_dev,
++				int ram_id, uint16_t scene)
++{
++	uint8_t write_buf[sizeof(uint32_t)];
++	preset_list_t *preset_list = NULL;
++	dev_list_t *dev_list;
++	int ret;
++	int i;
++
++	if (fsm_dev == NULL || fsm_dev->dev_list == NULL) {
++		return -EINVAL;
++	}
++	if ((fsm_dev->ram_scene[ram_id] != 0xFFFF)
++			&& ((fsm_dev->ram_scene[ram_id] & scene) != 0)) {
++		pr_addr(info, "RAM%d scene:%04X", ram_id,
++				fsm_dev->ram_scene[ram_id]);
++		return 0;
++	}
++	dev_list = fsm_dev->dev_list;
++	if ((dev_list->eq_scenes & scene) == 0) {
++		pr_addr(warning, "eq_scenes:%04X unmatched scene:%04X",
++				dev_list->eq_scenes,scene);
++		return 0;
++	}
++	for (i = 0; i < dev_list->len; i++) {
++		if (dev_list->index[i].type != FSM_DSC_PRESET_EQ) {
++			continue;
++		}
++		preset_list = (preset_list_t *)((uint8_t *)dev_list->index
++				+ dev_list->index[i].offset);
++		if (preset_list && preset_list->scene & scene) {
++			break;
++		}
++	}
++	// pr_addr(debug, "preset offset: %04x", index[i].offset);
++	if (!preset_list || i >= dev_list->len) {
++		pr_addr(err, "not found preset: %04X", scene);
++		return -EINVAL;
++	}
++
++	if (preset_list->len != fsm_dev->compat.preset_unit_len) {
++		pr_addr(err, "invalid size: %d", preset_list->len);
++		return -EINVAL;
++	}
++	ret = fsm_reg_write(fsm_dev, fsm_dev->compat.ACSEQA,
++			((ram_id == FSM_EQ_RAM0) ? 0 : preset_list->len));
++	for (i = 0; i < preset_list->len; i++) {
++		convert_data_to_bytes(preset_list->data[i], write_buf);
++		ret |= fsm_burst_write(fsm_dev, fsm_dev->compat.ACSEQWL,
++				write_buf, sizeof(uint32_t));
++	}
++	if (!ret) {
++		fsm_dev->ram_scene[ram_id] = preset_list->scene;
++		pr_addr(info, "wroten ram_scene[%d]:%04X",
++				ram_id, preset_list->scene);
++	}
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++int fsm_switch_preset(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	reg_temp_t sysctrl;
++	reg_temp_t pllc4;
++	uint16_t dspen;
++	int ret;
++
++	pr_addr(debug, "%s switching",
++			(cfg->force_scene ? "force" : "auto"));
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	if (!cfg->force_scene && fsm_dev->cur_scene == cfg->next_scene) {
++		pr_addr(debug, "same scene, skip");
++		return 0;
++	}
++	// need amplifier off
++	ret = fsm_reg_read(fsm_dev, REG(FSM_SYSCTRL), &sysctrl.new_val);
++	sysctrl.old_val = set_bf_val(&sysctrl.new_val, FSM_AMPE, 0);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), sysctrl.new_val);
++	// wait stable
++	ret |= fsm_wait_stable(fsm_dev, FSM_WAIT_AMP_OFF);
++	if (ret) {
++		pr_addr(err, "wait timeout!");
++		return ret;
++	}
++	// enable pll osc
++	ret = fsm_reg_read(fsm_dev, REG(FSM_PLLCTRL4), &pllc4.new_val);
++	pllc4.old_val = set_bf_val(&pllc4.new_val, FSM_OSCEN, 1);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL4), pllc4.new_val);
++	fsm_delay_ms(5); // 5ms
++
++	// load reg table
++	ret |= fsm_write_reg_tbl(fsm_dev, cfg->next_scene);
++
++	ret |= fsm_get_bf(fsm_dev, FSM_DSPEN, &dspen);
++	if (dspen == 0) { // bypass DSP
++		pr_addr(info, "note: Bypass DSP mode");
++		fsm_dev->state.bypass_dsp = true;
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL4), pllc4.old_val);
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), sysctrl.old_val);
++		fsm_dev->cur_scene = cfg->next_scene;
++		return 0;
++	}
++	fsm_dev->state.bypass_dsp = false;
++
++	ret |= fsm_access_key(fsm_dev, 1);
++	if (cfg->next_scene & fsm_dev->ram_scene[FSM_EQ_RAM0]) {
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_ACSCTRL), 0x9880); // eq ram0
++	} else if (cfg->next_scene & fsm_dev->ram_scene[FSM_EQ_RAM1]) {
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_ACSCTRL), 0x9890); // eq ram1
++	} else if (fsm_dev->dev_list->eq_scenes & cfg->next_scene) {
++		// use ram1 to switch preset
++		ret |= fsm_write_preset_eq(fsm_dev, FSM_EQ_RAM1, cfg->next_scene);
++		ret |= fsm_reg_write(fsm_dev, REG(FSM_ACSCTRL), 0x9890); // eq ram1
++		if (ret) {
++			pr_addr(err, "update scene[%04X] fail:%d",
++					cfg->next_scene, ret);
++		}
++	}
++	ret |= fsm_access_key(fsm_dev, 0);
++	if (!ret) {
++		fsm_dev->cur_scene = cfg->next_scene;
++		pr_addr(info, "switched scene:%04X", cfg->next_scene);
++	} else {
++		fsm_dev->cur_scene = FSM_SCENE_UNKNOW;
++	}
++
++	// recover pll and sysctrl
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL4), pllc4.old_val);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), sysctrl.old_val);
++	// ret |= fsm_reg_read(fsm_dev, REG(FSM_STATUS), NULL);//TODO
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++int fsm_write_preset(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	reg_temp_t sysctrl;
++	int ret;
++
++	if (!cfg || !fsm_dev || fsm_dev->own_scene == FSM_SCENE_UNKNOW) {
++		return -EINVAL;
++	}
++
++	if (cfg->force_scene) {
++		fsm_dev->cur_scene = FSM_SCENE_UNKNOW;
++		fsm_dev->ram_scene[FSM_EQ_RAM0] = FSM_SCENE_UNKNOW;
++		fsm_dev->ram_scene[FSM_EQ_RAM1] = FSM_SCENE_UNKNOW;
++	}
++	// need amplifier off
++	ret = fsm_reg_read(fsm_dev, REG(FSM_SYSCTRL), &sysctrl.new_val);
++	sysctrl.old_val = set_bf_val(&sysctrl.new_val, FSM_AMPE, 0);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), sysctrl.new_val);
++
++	ret |= fsm_set_spkset(fsm_dev);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_TEMPSEL), (fsm_dev->tcoef << 1));
++	ret = fsm_wait_stable(fsm_dev, FSM_WAIT_AMP_OFF);
++	if (ret) {
++		pr_addr(err, "wait timeout!");
++		return ret;
++	}
++
++	ret |= fsm_access_key(fsm_dev, 1);
++	ret |= fsm_write_stereo_ceof(fsm_dev);
++	ret |= fsm_write_excer_ram(fsm_dev);
++	// use music and voice scene config as default
++	ret |= fsm_write_preset_eq(fsm_dev, FSM_EQ_RAM0, FSM_SCENE_MUSIC);
++	ret |= fsm_write_preset_eq(fsm_dev, FSM_EQ_RAM1, FSM_SCENE_VOICE);
++	ret |= fsm_write_reg_tbl(fsm_dev, FSM_SCENE_COMMON);
++	ret |= fsm_access_key(fsm_dev, 0);
++
++	// ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL4), 0);
++
++	ret |= fsm_switch_preset(fsm_dev);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), sysctrl.old_val);
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++static int fsm_set_tsctrl(fsm_dev_t *fsm_dev,
++				bool enable, bool auto_off)
++{
++	uint16_t tsctrl;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	ret = fsm_reg_multiread(fsm_dev, REG(FSM_TSCTRL), &tsctrl);
++	set_bf_val(&tsctrl, FSM_TSEN, enable);
++	set_bf_val(&tsctrl, FSM_OFF_AUTOEN, auto_off);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_TSCTRL), tsctrl);
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++uint32_t fsm_cal_spkr_zmimp(fsm_dev_t *fsm_dev, uint16_t data)
++{
++	uint32_t result;
++
++	if (!fsm_dev) {
++		return 0xFFFF;
++	}
++	if (fsm_dev->compat.RS2RL_RATIO == 0) {
++		pr_addr(info, "invalid rs ratio");
++		return 0;
++	}
++	if (data == 0) { // invalid data
++		return 0xFFFF;
++	}
++	result = FSM_MAGNIF(fsm_dev->compat.RS2RL_RATIO * LOW8(fsm_dev->rstrim));
++	result = (result / data);
++
++	return result;
++}
++
++static uint16_t fsm_cal_threshold(fsm_dev_t *fsm_dev,
++				int mt_type, uint16_t zmdata)
++{
++	uint16_t mt_tempr;
++	uint32_t result;
++	uint32_t spk_rt;
++	int rapp;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	mt_tempr = fsm_get_spk_info(fsm_dev, mt_type);
++	pr_addr(debug, "MT[%d]:%d", mt_type, mt_tempr);
++	if (mt_tempr <= 0) {
++		pr_addr(err, "get MT info failed");
++		return 0;
++	}
++	result = (uint32_t)zmdata * FSM_MAGNIF_TEMPR_COEF;
++	result = result / (FSM_MAGNIF_TEMPR_COEF + (uint32_t)fsm_dev->tcoef *
++			(mt_tempr * fsm_dev->tmax / 100 - (fsm_dev->tsel >> 1)));
++	rapp = fsm_get_spk_info(fsm_dev, FSM_INFO_SPK_RAPP);
++	spk_rt = fsm_cal_spkr_zmimp(fsm_dev, result);
++	if (rapp > 0) {
++		pr_addr(info, "rapp:%d, zm:%X", rapp, result);
++		spk_rt += rapp;
++		result = fsm_cal_spkr_zmimp(fsm_dev, spk_rt);
++	}
++	pr_addr(info, "MT[%3d]:%X, rt:%d", mt_tempr, result, spk_rt);
++
++	return (uint16_t)result;
++}
++
++static int fsm_check_re25_range(fsm_dev_t *fsm_dev, int re25)
++{
++	int temp_val;
++	int re25_min;
++	int re25_max;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	temp_val = FSM_MAGNIF(fsm_dev->spkr);
++	if (fsm_dev->spkr <= 10) {
++		re25_min = temp_val * (100 - FSM_SPKR_ALLOWANCE) / 100;
++		re25_max = temp_val * (100 + FSM_SPKR_ALLOWANCE) / 100;
++	} else {
++		re25_min = temp_val * (100 - FSM_RCVR_ALLOWANCE) / 100;
++		re25_max = temp_val * (100 + FSM_RCVR_ALLOWANCE) / 100;
++	}
++	pr_addr(info, "spkr:%d, min:%d, max:%d",
++			fsm_dev->spkr, re25_min, re25_max);
++	if (re25 < re25_min || re25 > re25_max) {
++		pr_addr(err, "invalid re25:%d", re25);
++		fsm_dev->state.calibrated = false;
++		fsm_reg_write(fsm_dev, REG(FSM_ADCTIME), 0x0031);
++		fsm_set_tsctrl(fsm_dev, true, true);
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static int fsm_set_threshold_v1(fsm_dev_t *fsm_dev, uint16_t zmdata)
++{
++	uint16_t value;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	value = fsm_cal_threshold(fsm_dev, FSM_INFO_SPK_TRE, zmdata);
++	ret = fsm_reg_write(fsm_dev, REG(FSM_SPKRE), value);
++	value = fsm_cal_threshold(fsm_dev, FSM_INFO_SPK_TM6, zmdata);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKM6), value);
++	value = fsm_cal_threshold(fsm_dev, FSM_INFO_SPK_TM24, zmdata);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKM24), value);
++	value = fsm_cal_threshold(fsm_dev, FSM_INFO_SPK_TERR, zmdata);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKERR), value);
++
++	return ret;
++}
++
++static int fsm_set_threshold_v2(fsm_dev_t *fsm_dev, uint16_t zmdata)
++{
++	uint16_t value;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	value = fsm_cal_threshold(fsm_dev, FSM_INFO_SPK_TRE, zmdata);
++	ret = fsm_reg_write(fsm_dev, REG(FSM_SPKRE), value);
++	value = fsm_cal_threshold(fsm_dev, FSM_INFO_SPK_TM01, zmdata);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKMT01), value);
++	value = fsm_cal_threshold(fsm_dev, FSM_INFO_SPK_TM02, zmdata);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKMT02), value);
++	value = fsm_cal_threshold(fsm_dev, FSM_INFO_SPK_TM03, zmdata);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKMT03), value);
++	value = fsm_cal_threshold(fsm_dev, FSM_INFO_SPK_TM04, zmdata);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKMT04), value);
++	value = fsm_cal_threshold(fsm_dev, FSM_INFO_SPK_TM05, zmdata);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKMT05), value);
++	value = fsm_cal_threshold(fsm_dev, FSM_INFO_SPK_TM06, zmdata);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKMT06), value);
++	value = fsm_cal_threshold(fsm_dev, FSM_INFO_SPK_TERR, zmdata);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKERR), value);
++
++	return ret;
++}
++
++static int fsm_set_threshold(fsm_dev_t *fsm_dev,
++				uint16_t data, int type)
++{
++	struct fsm_calib calib;
++	uint16_t value;
++	int temp_val;
++	int rapp;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	ret = fsm_reg_read(fsm_dev, REG(FSM_OTPPG1W2), &value);
++	if (ret || value == 0) {
++		pr_warning("use default rs_trim value");
++		value = FSM_RS_TRIM_DEFAULT;
++	}
++	fsm_dev->rstrim = value;
++	temp_val = (data == 0) ? 0xFFFF : \
++		(FSM_MAGNIF(fsm_dev->compat.RS2RL_RATIO * LOW8(value)) / data);
++
++	if (type == FSM_DATA_TYPE_ZMDATA) {
++		rapp = fsm_get_spk_info(fsm_dev, FSM_INFO_SPK_RAPP);
++		calib.cal_zm = data;
++		calib.re25 = ((data == 0xFFFF) ? 65535 : temp_val);
++		if (rapp > 0) {
++			pr_addr(info, "re25(has rapp:%d):%d", rapp, calib.re25);
++			calib.re25 -= rapp;
++			// update cal_zm by re25 without rapp
++			calib.cal_zm = fsm_cal_spkr_zmimp(fsm_dev, calib.re25);
++		}
++	} else {
++		calib.cal_zm = temp_val;
++		calib.re25 = data;
++	}
++	pr_addr(info, "zm:%04X, re25:%d", calib.cal_zm, calib.re25);
++
++	fsm_dev->re25 = calib.re25;
++	ret |= fsm_check_re25_range(fsm_dev, calib.re25);
++	if (ret) {
++		pr_err("check re25 fail:%d", ret);
++		fsm_dev->state.calibrated = false;
++		return ret;
++	}
++	fsm_dev->state.calibrated = true;
++	if ((IS_PRESET_V3(fsm_dev->dev_list->preset_ver))
++			&& fsm_dev->is_1894s) {
++		ret |= fsm_set_threshold_v2(fsm_dev, calib.cal_zm);
++	}
++	else {
++		ret |= fsm_set_threshold_v1(fsm_dev, calib.cal_zm);
++	}
++
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_ADCTIME), 0x0031);
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++int fsm_parse_otp(fsm_dev_t *fsm_dev, uint16_t value,
++				int *re25, int *count)
++{
++	uint8_t byte;
++	int step_unit;
++	int cal_count;
++	int spkr_mag;
++	int offset;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	// parse re25
++	if (re25 != NULL) {
++		byte = (uint8_t)((value >> 8) & 0xFF);
++		spkr_mag = FSM_MAGNIF(fsm_dev->spkr);
++		if (fsm_dev->spkr <= 10) {
++			step_unit = spkr_mag * FSM_SPKR_ALLOWANCE / 12700;
++		} else {
++			step_unit = spkr_mag * FSM_RCVR_ALLOWANCE / 12700;
++		}
++		step_unit += 1; // fix integer precision
++		//bug 576847 , baoshulin@wingtech.com, 20200723, solve pa write otp overflow
++		if (byte == 0x7F) {
++			byte = 0x00;
++		}
++		offset = (byte & 0x7F) * step_unit;
++		if ((byte & 0x80) != 0) {
++			*re25 = spkr_mag - offset;
++		} else {
++			*re25 = spkr_mag + offset;
++		}
++		pr_addr(info, "offset:%d, step:%d, re25:%d mohm",
++				offset, step_unit, *re25);
++	}
++
++	// parse calibration count
++	cal_count = parse_otp_write_count(fsm_dev, value);
++	pr_addr(info, "cal_count:%d", cal_count);
++	fsm_dev->state.otp_stored = ((cal_count > 0) ? 1 : 0);
++	if (count != NULL) {
++		*count = cal_count;
++	}
++
++	return 0;
++}
++
++int fsm_check_otp(fsm_dev_t *fsm_dev)
++{
++	uint16_t otppg2;
++	uint16_t pllc4;
++	int count;
++	int re25;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	ret = fsm_reg_read(fsm_dev, REG(FSM_PLLCTRL4), &pllc4);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL4), 0x000F);
++	ret |= fsm_access_key(fsm_dev, 1);
++	ret |= fsm_reg_read(fsm_dev, REG(FSM_OTPPG2), &otppg2);
++	pr_addr(debug, "OTPPG2:%04X", otppg2);
++	fsm_parse_otp(fsm_dev, otppg2, &re25, &count);
++	fsm_dev->cal_count = count;
++
++	if (count > 0 && count < fsm_dev->compat.otp_max_count) {
++		fsm_set_threshold(fsm_dev, re25, FSM_DATA_TYPE_RE25);
++	} else if (count == 0) {
++		pr_addr(warning, "not calibrate yet");
++	}
++	else {
++		pr_addr(err, "got something wrong");
++	}
++	ret |= fsm_access_key(fsm_dev, 0);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_PLLCTRL4), pllc4);
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++int fsm_config_vol(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	struct fsm_vbat_state *vbat_state;
++	uint16_t cur_batv;
++	uint16_t vol_vbat;
++	uint16_t volume;
++
++	vbat_state = &g_vbat_state;
++	if (!fsm_dev || !cfg || !vbat_state) {
++		return -EINVAL;
++	}
++	if (cfg->stream_muted) {
++		return fsm_reg_write(fsm_dev, REG(FSM_AUDIOCTRL), 0x0000);
++	}
++	if (cfg->volume > FSM_VOLUME_MAX) {
++		cfg->volume = FSM_VOLUME_MAX;
++	}
++	volume = (fsm_dev->state.calibrated ? cfg->volume : 0xDF); // -12db
++	if (cfg->use_monitor) {
++		cur_batv = vbat_state->cur_batv;
++		if (cur_batv > FSM_VBAT_HIGH)
++			cur_batv = FSM_VBAT_HIGH;
++		else if (cur_batv < FSM_VBAT_LOW)
++			cur_batv = FSM_VBAT_LOW;
++		vol_vbat = 0xFF - (FSM_VBAT_HIGH - cur_batv) / FSM_VBAT_STEP;
++		if (vbat_state->cur_batv != 0 && cfg->next_scene < FSM_SCENE_LOW_PWR) {
++			// update volume
++			volume = MIN(volume, vol_vbat);
++		}
++	}
++	volume = ((volume << 8) & 0xFF00);
++	pr_addr(debug, "vol: %04X", volume);
++
++	return fsm_reg_write(fsm_dev, REG(FSM_AUDIOCTRL), volume);
++}
++
++static uint8_t fsm_re25_to_byte(fsm_dev_t *fsm_dev, int re25)
++{
++	uint8_t valOTP;
++	int step_unit;
++	int spkr_mag;
++	int offset;
++
++	if (fsm_dev == NULL || re25 == 0) {
++		return 0xff;
++	}
++
++	spkr_mag = FSM_MAGNIF(fsm_dev->spkr);
++	if (fsm_dev->spkr <= 10) {
++		step_unit = (spkr_mag * FSM_SPKR_ALLOWANCE) / 12700;
++	} else {
++		step_unit = (spkr_mag * FSM_RCVR_ALLOWANCE) / 12700;
++	}
++	step_unit += 1; // fix integer precision
++	offset = re25 - spkr_mag;
++	if (offset < 0) {
++		offset *= -1;
++		valOTP = (uint8_t)((offset / step_unit) & 0xFF) + 1;
++		if (valOTP > 0x7F) {
++			valOTP = 0x7F;
++		}
++		valOTP |= 0x80;
++	} else {
++		valOTP = (uint8_t)((offset / step_unit) & 0xFF) - 1;
++//bug 576847 , baoshulin@wingtech.com, 20200723, solve pa write otp overflow
++		if (offset < step_unit) {
++			valOTP = 0;
++		}
++		if (valOTP > 0x7F) {
++			valOTP = 0x7F;
++		}
++	}
++	pr_addr(info, "re25:%d mohm, step:%d, offset:%d, valOTP:%02X",
++			re25, step_unit, offset, valOTP);
++
++	return valOTP;
++}
++
++static int fsm_set_cal_mode(fsm_dev_t *fsm_dev)
++{
++	int ret;
++
++	if (!fsm_dev) {
++		return -EINVAL;
++	}
++	fsm_access_key(fsm_dev, 1);
++	ret = fsm_reg_write(fsm_dev, REG(FSM_ZMCONFIG), 0x0010);
++	ret |= fsm_set_tsctrl(fsm_dev, true, false);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_AUDIOCTRL), 0x8F00);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKERR), 0x0000);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKRE), 0x0000);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKM6), 0x0000);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SPKM24), 0x0000);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_ADCENV), 0xFFFF);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_ADCTIME), 0x0031);
++	fsm_access_key(fsm_dev, 0);
++
++	return ret;
++}
++
++int fsm_check_status(fsm_dev_t *fsm_dev)
++{
++	uint16_t status;
++	uint16_t bf_val;
++	int ready;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	ret = fsm_reg_multiread(fsm_dev, REG(FSM_STATUS), &status);
++	pr_addr(info, "status:%04X", status);
++	bf_val = get_bf_val(FSM_BOVDS, status);
++	if (!bf_val)
++		pr_addr(info, "overvoltage on boost");
++	ready = bf_val;
++	bf_val = get_bf_val(FSM_PLLS, status);
++	if (!bf_val)
++		pr_addr(info, "PLL is not in lock");
++	ready &= bf_val;
++	bf_val = get_bf_val(FSM_OTDS, status);
++	if (!bf_val)
++		pr_addr(info, "over temperature");
++	ready &= bf_val;
++	bf_val = get_bf_val(FSM_OVDS, status);
++	if (!bf_val)
++		pr_addr(info, "overvoltage on VBAT");
++	ready &= bf_val;
++	bf_val = get_bf_val(FSM_UVDS, status);
++	if (!bf_val)
++		pr_addr(info, "undervoltage on VBAT");
++	ready &= bf_val;
++	bf_val = get_bf_val(FSM_OCDS, status);
++	if (bf_val)
++		pr_addr(info, "overcurrent in amplifier");
++	ready &= (!bf_val);
++	bf_val = get_bf_val(FSM_CLKS, status);
++	if (!bf_val)
++		pr_addr(info, "bclk/ws is not stable");
++	ready &= bf_val;
++	if(!ret && ready) {
++		return 0;
++	}
++
++	return -EINVAL;
++}
++
++/*
++ * fsm stub api
++ */
++int fsm_stub_dev_init(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	int ret;
++
++	if (fsm_dev == NULL || cfg == NULL) {
++		return -EINVAL;
++	}
++
++	if (cfg->force_init) {
++		pr_addr(info, "force init");
++	}
++	if (!cfg->force_init && fsm_dev->state.dev_inited) {
++		return 0;
++	}
++	if (fsm_dev->dev_ops.dev_init) {
++		return fsm_dev->dev_ops.dev_init(fsm_dev);
++	}
++	ret = fsm_init_dev_list(fsm_dev);
++	if (ret || !fsm_dev->dev_list) {
++		pr_addr(err, "init dev_list fail:%d", ret);
++		return ret;
++	}
++	fsm_dev->state.dev_inited = true;
++	ret = fsm_init_info(fsm_dev);
++
++	if (fsm_dev->dev_ops.reg_init) {
++		fsm_dev->dev_ops.reg_init(fsm_dev);
++	}
++	ret |= fsm_write_preset(fsm_dev);
++	ret |= fsm_check_otp(fsm_dev);
++
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), 0x0001);
++	fsm_wait_stable(fsm_dev, FSM_WAIT_AMP_ADC_OFF);
++	if (ret) {
++		pr_addr(err, "init failed:%d", ret);
++		fsm_dev->state.dev_inited = false;
++	}
++	fsm_dev->errcode = ret;
++
++	return ret;
++}
++
++int fsm_stub_start_up(fsm_dev_t *fsm_dev)
++{
++	uint16_t sysctrl;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	if (fsm_dev->dev_ops.start_up) {
++		return fsm_dev->dev_ops.start_up(fsm_dev);
++	}
++	if (fsm_dev->dev_ops.i2s_config) {
++		ret = fsm_dev->dev_ops.i2s_config(fsm_dev);
++	}
++	if (fsm_dev->dev_ops.pll_config) {
++		ret = fsm_dev->dev_ops.pll_config(fsm_dev, true);
++	}
++	// power on device
++	ret = fsm_reg_read(fsm_dev, REG(FSM_SYSCTRL), &sysctrl);
++	// set_bf_val(&sysctrl, FSM_AMPE, 1);
++	set_bf_val(&sysctrl, FSM_PWDN, 0);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), sysctrl);
++	// ret |= fsm_config_vol(fsm_dev); // move to fsm_stub_set_mute
++	fsm_dev->errcode = ret;
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++int fsm_stub_check_stable(fsm_dev_t *fsm_dev, int type)
++{
++	uint16_t value;
++	int ready;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	if (fsm_dev->dev_ops.check_stable) {
++		return fsm_dev->dev_ops.check_stable(fsm_dev, type);
++	}
++	switch (type) {
++	case FSM_WAIT_STATUS_ON:
++		ret = fsm_check_status(fsm_dev);
++		ready = !ret;
++		break;
++	case FSM_WAIT_AMP_ON:
++	case FSM_WAIT_AMP_ADC_ON:
++		ret = fsm_reg_multiread(fsm_dev, REG(FSM_STATUS), &value);
++		ready = get_bf_val(FSM_CLKS, value);
++		ready &= get_bf_val(FSM_PLLS, value);
++		ret |= fsm_get_bf(fsm_dev, FSM_SSEND, &value);
++		ready &= value;
++		break;
++	case FSM_WAIT_AMP_OFF:
++		ret = fsm_get_bf(fsm_dev, FSM_DACRUN, &value);
++		ready = (value == 0 ? 1 : 0);
++		break;
++	case FSM_WAIT_AMP_ADC_OFF:
++	case FSM_WAIT_AMP_ADC_PLL_OFF:
++		ret = fsm_reg_multiread(fsm_dev, REG(FSM_DIGSTAT), &value);
++		ready = get_bf_val(FSM_ADCRUN, value);
++		ready |= get_bf_val(FSM_DACRUN, value);
++		ready = !ready;
++		break;
++	case FSM_WAIT_TSIGNAL_OFF:
++		ret = fsm_get_bf(fsm_dev, FSM_OFFSTA, &value);
++		ready = value;
++		break;
++	case FSM_WAIT_OTP_READY:
++		ret = fsm_get_bf(fsm_dev, FSM_OTPBUSY, &value);
++		ready = !value;
++		break;
++	case FSM_WAIT_BOOST_SSEND:
++		ret = fsm_get_bf(fsm_dev, FSM_SSEND, &value);
++		ready = value;
++		break;
++	default:
++		ret = -EINVAL;
++		ready = 0;
++		break;
++	}
++	if (ready && type == FSM_WAIT_AMP_ADC_PLL_OFF) {
++		if (fsm_dev->dev_ops.pll_config) {
++			fsm_dev->dev_ops.pll_config(fsm_dev, false);
++		}
++	}
++	if (ready && type == FSM_WAIT_AMP_ADC_ON) {
++		ret |= fsm_reg_multiread(fsm_dev, REG(FSM_DIGSTAT), &value);
++		ready &= get_bf_val(FSM_DACRUN, value);
++		ready &= get_bf_val(FSM_ADCRUN, value);
++	}
++	if (!ret && !ready) {
++		ret = -EINVAL;
++	}
++
++	return ret;
++}
++
++int fsm_stub_set_tsignal(fsm_dev_t *fsm_dev, bool enable)
++{
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	if (fsm_dev->dev_ops.set_tsignal) {
++		return fsm_dev->dev_ops.set_tsignal(fsm_dev, enable);
++	}
++	return fsm_set_tsctrl(fsm_dev, enable, true);
++}
++
++int fsm_stub_set_mute(fsm_dev_t *fsm_dev, bool mute)
++{
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	if (fsm_dev->dev_ops.set_mute) {
++		return fsm_dev->dev_ops.set_mute(fsm_dev, mute);
++	}
++	ret = fsm_config_vol(fsm_dev);
++	ret |= fsm_set_bf(fsm_dev, FSM_AMPE, !mute);
++	fsm_dev->errcode = ret;
++
++	return ret;
++}
++
++int fsm_stub_shut_down(fsm_dev_t *fsm_dev)
++{
++	uint16_t sysctrl;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	if (fsm_dev->dev_ops.shut_down) {
++		return fsm_dev->dev_ops.shut_down(fsm_dev);
++	}
++	// fsm_reg_multiread(fsm_dev, REG(FSM_DIGSTAT), NULL); // TODO
++	// ret = fsm_config_vol(fsm_dev);
++	ret = fsm_reg_read(fsm_dev, REG(FSM_SYSCTRL), &sysctrl);
++	// amplifier off and power down device
++	// set_bf_val(&sysctrl, FSM_AMPE, 0);
++	set_bf_val(&sysctrl, FSM_PWDN, 1);
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_SYSCTRL), sysctrl);
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++static int fsm_stub_store_otp(fsm_dev_t *fsm_dev, uint8_t valOTP)
++{
++	if (fsm_dev && fsm_dev->dev_ops.store_otp) {
++		return fsm_dev->dev_ops.store_otp(fsm_dev, valOTP);
++	}
++	else {
++		pr_addr(err, "not support");
++		return -EINVAL;
++	}
++}
++
++int fsm_stub_pre_calib(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	int force;
++	int ret;
++
++	if (fsm_dev == NULL || !cfg) {
++		return -EINVAL;
++	}
++	if (fsm_dev->dev_ops.pre_calib) {
++		return fsm_dev->dev_ops.pre_calib(fsm_dev);
++	}
++	force = cfg->force_calib;
++	pr_addr(info, "force:%d, calibrated:%d",
++			force, fsm_dev->state.calibrated);
++	if (!force && fsm_dev->state.calibrated) {
++		pr_addr(info, "already calibrated");
++		return 0;
++	}
++	fsm_dev->state.calibrated = false;
++	fsm_dev->re25 = 0;
++	if (fsm_dev->tdata) {
++		fsm_dev->tdata->test_re25 = 0;
++		memset(&fsm_dev->tdata->re25, 0, sizeof(struct re25_data));
++	}
++	ret = fsm_set_cal_mode(fsm_dev);
++	ret |= fsm_check_status(fsm_dev);
++	if (ret) {
++		pr_addr(err, "error:%d, stop test", ret);
++		fsm_dev->state.re25_runin = false;
++		return ret;
++	}
++	fsm_dev->state.re25_runin = true;
++
++	return ret;
++}
++
++int fsm_stub_post_calib(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	uint8_t valOTP;
++	uint16_t cal_zm;
++	int ret;
++
++	if (fsm_dev == NULL || !cfg || !fsm_dev->tdata) {
++		return -EINVAL;
++	}
++	if (!fsm_dev->state.re25_runin) {
++		pr_addr(info, "invalid running state");
++		return 0;
++	}
++	if (fsm_dev->dev_ops.post_calib) {
++		return fsm_dev->dev_ops.post_calib(fsm_dev);
++	}
++	fsm_dev->state.re25_runin = false;
++	cal_zm = fsm_dev->tdata->re25.zmdata;
++	// calculate spk-t thrd and re25
++	ret = fsm_access_key(fsm_dev, 1);
++	ret |= fsm_set_threshold(fsm_dev, cal_zm, FSM_DATA_TYPE_ZMDATA);
++	fsm_dev->tdata->test_re25 = fsm_dev->re25;
++	ret |= fsm_reg_write(fsm_dev, REG(FSM_ZMCONFIG), 0x0000);
++	ret |= fsm_access_key(fsm_dev, 0);
++	if (ret) {
++		return ret;
++	}
++	valOTP = fsm_re25_to_byte(fsm_dev, fsm_dev->re25);
++
++	if (valOTP != 0xFF && cfg->store_otp) {
++		ret |= fsm_stub_store_otp(fsm_dev, valOTP);
++		if (ret) {
++			pr_addr(err, "store otp fail:%d", ret);
++			fsm_dev->tdata->test_re25 = fsm_dev->re25 = 65535;
++		}
++	}
++	// ret |= fsm_config_vol(fsm_dev); // move to fsm_stub_set_mute
++	fsm_dev->errcode = ret;
++
++	FSM_FUNC_EXIT(ret);
++	return ret;
++}
++
++int fsm_stub_dev_deinit(fsm_dev_t *fsm_dev)
++{
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	if (fsm_dev->dev_ops.deinit) {
++		return fsm_dev->dev_ops.deinit(fsm_dev);
++	}
++	// deinit here
++
++	return 0;
++}
++
++int fsm_dev_recover(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	int ret;
++
++	if (!cfg || !fsm_dev) {
++		return -EINVAL;
++	}
++	if (fsm_skip_device(fsm_dev)) {
++		return 0;
++	}
++	if (fsm_dev->dev_ops.dev_recover) {
++		return fsm_dev->dev_ops.dev_recover(fsm_dev);
++	}
++	ret = fsm_check_status(fsm_dev);
++	if (!ret) {
++		return ret;
++	}
++	pr_addr(info, "recover device");
++	cfg->force_init = true;
++	cfg->force_scene = true;
++	ret |= fsm_stub_dev_init(fsm_dev);
++	ret |= fsm_stub_start_up(fsm_dev);
++	fsm_wait_stable(fsm_dev, FSM_WAIT_AMP_ON);
++	ret |= fsm_stub_set_mute(fsm_dev, false);
++	fsm_wait_stable(fsm_dev, FSM_WAIT_AMP_ADC_ON);
++	ret |= fsm_stub_set_tsignal(fsm_dev, true);
++	cfg->force_init = false;
++	cfg->force_scene = false;
++
++	return ret;
++}
++
++int fsm_dev_count(void)
++{
++	return g_fsm_config.dev_count;
++}
++
++void fsm_set_i2s_clocks(uint32_t rate, uint32_t bclk)
++{
++	fsm_config_t *cfg = fsm_get_config();
++
++	if (!cfg) {
++		return;
++	}
++	fsm_mutex_lock();
++	cfg->i2s_bclk = bclk;
++	cfg->i2s_srate = rate;
++	if (rate == 32000) {
++		cfg->i2s_bclk += 32;
++	}
++	fsm_mutex_unlock();
++}
++
++void fsm_set_scene(int scene)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	fsm_dev_t *fsm_dev = NULL;
++	bool state;
++
++	if (!cfg || scene < 0 || scene >= FSM_SCENE_MAX) {
++		pr_err("invaild scene:%d", scene);
++		return;
++	}
++	fsm_mutex_lock();
++	if (cfg->speaker_on) {
++		// switch scene online
++		state = cfg->skip_monitor;
++		cfg->skip_monitor = true;
++		// turn off devices firstly
++		fsm_list_func_arg(fsm_dev, fsm_stub_set_tsignal, false);
++		fsm_list_wait(FSM_WAIT_TSIGNAL_OFF);
++		fsm_list_func_arg(fsm_dev, fsm_stub_set_mute, true);
++		fsm_list_func(fsm_dev, fsm_stub_shut_down);
++		fsm_list_wait(FSM_WAIT_AMP_ADC_PLL_OFF);
++		// switch preset by scene
++		cfg->next_scene = BIT(scene);
++		fsm_list_func(fsm_dev, fsm_switch_preset);
++		// turn on devices by scene
++		fsm_list_func(fsm_dev, fsm_stub_start_up);
++		fsm_list_wait(FSM_WAIT_AMP_ON);
++		fsm_list_func(fsm_dev, fsm_get_vbat);
++		fsm_list_func_arg(fsm_dev, fsm_stub_set_mute, false);
++		fsm_list_wait(FSM_WAIT_AMP_ADC_ON);
++		fsm_delay_ms(10);
++		fsm_list_func_arg(fsm_dev, fsm_stub_set_tsignal, true);
++		cfg->skip_monitor = state;
++	}
++	else {
++		// swtich scene offline
++		cfg->next_scene = BIT(scene);
++		fsm_list_func(fsm_dev, fsm_switch_preset);
++	}
++	fsm_mutex_unlock();
++}
++
++void fsm_set_volume(int volume)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	fsm_dev_t *fsm_dev;
++
++	if (!cfg) {
++		return;
++	}
++	fsm_mutex_lock();
++	if (volume < 0 || volume > FSM_VOLUME_MAX) {
++		pr_warning("invalid volume: %d, default 0dB", volume);
++		volume = FSM_VOLUME_MAX;
++	}
++	cfg->volume = volume;
++	if (!cfg->stream_muted) {
++		fsm_list_func(fsm_dev, fsm_config_vol);
++	}
++	fsm_mutex_unlock();
++}
++
++void fsm_set_fw_name(char *name)
++{
++	fsm_config_t *cfg = fsm_get_config();
++
++	if (cfg) {
++		cfg->fw_name = name;
++	}
++}
++
++int fsm_detect_device(fsm_dev_t *fsm_dev, uint8_t dev_id)
++{
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++	fsm_dev->use_irq = false;
++	switch (dev_id) {
++	case FS1601S_DEV_ID:
++		g_fsm_config.fw_name = "fs1601s.fsm";
++		fs1601s_ops(fsm_dev);
++		break;
++	case FS1603_DEV_ID:
++		g_fsm_config.fw_name = "fs1603.fsm";
++		fs1603_ops(fsm_dev);
++		break;
++	case FS1818_DEV_ID:
++	case FS1896_DEV_ID:
++		g_fsm_config.fw_name = "fs1801.fsm";
++		fs1801_ops(fsm_dev);
++		break;
++	case FS1860_DEV_ID:
++		g_fsm_config.fw_name = "fs1860.fsm";
++		fs1860_ops(fsm_dev);
++		break;
++	default:
++		pr_addr(err, "invalid dev_id:%02X", dev_id);
++		memset(&fsm_dev->dev_ops, 0, sizeof(fsm_dev->dev_ops));
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++int fsm_probe(fsm_dev_t *fsm_dev, int addr)
++{
++	uint16_t id;
++	int ret;
++
++	if (fsm_dev == NULL) {
++		return -EINVAL;
++	}
++
++	fsm_mutex_lock();
++	fsm_dev->addr = addr;
++	ret = fsm_reg_read(fsm_dev, REG(FSM_ID), &id);
++	if (ret) {
++		fsm_dev->addr = 0;
++		fsm_mutex_unlock();
++		return ret;
++	}
++	ret = fsm_detect_device(fsm_dev, HIGH8(id));
++	if (ret) {
++		pr_addr(err, "Unknown DEVID: %04X", id);
++		fsm_dev->addr = 0;
++		fsm_mutex_unlock();
++		return ret;
++	}
++	pr_addr(info, "Found DEVID: %04X", id);
++	fsm_dev->ram_scene[FSM_EQ_RAM0] = FSM_SCENE_UNKNOW;
++	fsm_dev->ram_scene[FSM_EQ_RAM1] = FSM_SCENE_UNKNOW;
++	fsm_dev->own_scene = FSM_SCENE_UNKNOW;
++	fsm_dev->cur_scene = FSM_SCENE_UNKNOW;
++	fsm_dev->version = id;
++	fsm_dev->is_1894s = ((id == FS1894S_REVID) ? true : false);
++	fsm_dev->acc_count = 0;
++
++	fsm_list_init(fsm_dev);
++	g_fsm_config.dev_count++;
++	fsm_mutex_unlock();
++//bug 538153, baoshulin@wingtech.com, 20200310, add mmitest and smartpa info
++	fsm_firmware_show(id);
++//ExtB P200626-05620, baoshulin@wingtech.com, 20200720, modify bootup default angle.
++	fsm_stereo_flip(270);
++	return 0;
++}
++
++void fsm_remove(fsm_dev_t *fsm_dev)
++{
++	if (!fsm_dev) {
++		return;
++	}
++	fsm_mutex_lock();
++#if defined(CONFIG_FSM_STEREO)
++	list_del(&fsm_dev->list);
++#endif
++	if (fsm_dev->tdata) {
++		fsm_free_mem(fsm_dev->tdata);
++	}
++	g_fsm_config.dev_count--;
++	fsm_mutex_unlock();
++}
++
++/**
++ * try init deivce without lock
++ */
++static int fsm_try_init(void)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	fsm_dev_t *fsm_dev = NULL;
++	uint16_t next_scene;
++	int ret;
++
++	if (fsm_dev_count() <= 0) {
++		pr_err("no found device");
++		return -EINVAL;
++	}
++	cfg->force_scene = cfg->force_init;
++	ret = fsm_firmware_init_sync(cfg->fw_name);
++	if (!fsm_get_presets()) {
++		pr_err("invalid firmware, ret:%d", ret);
++		return -EINVAL;
++	}
++	next_scene = cfg->next_scene;
++	cfg->next_scene = FSM_SCENE_MUSIC; // init all devices
++	list_for_each_entry(fsm_dev, &fsm_dev_list, list) {
++		fsm_stub_dev_init(fsm_dev);
++	}
++	cfg->next_scene = next_scene; // recovery scene
++	cfg->force_scene = cfg->force_init = false;
++
++	return 0;
++}
++
++void fsm_init(void)
++{
++	int ret;
++
++	ret = fsm_hal_open();
++	if (ret) {
++		pr_err("hal open fail:%d", ret);
++		return;
++	}
++	fsm_mutex_lock();
++	ret = fsm_try_init();
++	if (ret) { // no device or firmware
++		pr_err("init failed: %d", ret);
++	}
++	pr_debug("done");
++	fsm_mutex_unlock();
++}
++
++void fsm_speaker_onn(void)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	struct fsm_vbat_state *vbat_state;
++	fsm_dev_t *fsm_dev = NULL;
++	int ret;
++
++	pr_info("scene: %04X", cfg->next_scene);
++	fsm_mutex_lock();
++	cfg->stream_muted = false;
++	ret = fsm_try_init();
++	if (ret) { // no device or firmware
++		pr_err("init failed: %d", ret);
++		fsm_mutex_unlock();
++		return;
++	}
++	// fsm_list_func(fsm_dev, fsm_switch_preset);
++	fsm_list_func(fsm_dev, fsm_stub_start_up);
++	fsm_list_wait(FSM_WAIT_AMP_ON);
++	vbat_state = &g_vbat_state;
++	vbat_state->cur_batv = 0;
++	fsm_list_func(fsm_dev, fsm_get_vbat);
++	pr_info("vbat:%d", vbat_state->cur_batv);
++	fsm_list_func_arg(fsm_dev, fsm_stub_set_mute, false);
++	vbat_state->last_batv = vbat_state->cur_batv;
++	fsm_list_wait(FSM_WAIT_AMP_ADC_ON);
++	fsm_delay_ms(10);
++	fsm_list_func_arg(fsm_dev, fsm_stub_set_tsignal, true);
++	// cfg->skip_monitor = false; // not use fsm_set_monitor
++	// fsm_list_func(fsm_dev, fsm_set_monitor);
++	cfg->cur_angle = cfg->next_angle;
++	cfg->speaker_on = true;
++	pr_debug("done");
++	fsm_mutex_unlock();
++}
++
++void fsm_speaker_off(void)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	fsm_dev_t *fsm_dev = NULL;
++	int ret;
++
++	pr_info("scene: %04X", cfg->next_scene);
++	fsm_mutex_lock();
++	// cfg->skip_monitor = true; // not use fsm_set_monitor
++	cfg->stream_muted = true;
++	// fsm_list_func(fsm_dev, fsm_set_monitor);
++	ret = fsm_try_init();
++	if (ret) {
++		pr_err("try init failed: %d", ret);
++		fsm_mutex_unlock();
++		return;
++	}
++	fsm_list_func_arg(fsm_dev, fsm_stub_set_tsignal, false);
++	fsm_list_wait(FSM_WAIT_TSIGNAL_OFF);
++	fsm_list_func_arg(fsm_dev, fsm_stub_set_mute, true);
++	fsm_list_func(fsm_dev, fsm_stub_shut_down);
++	fsm_list_wait(FSM_WAIT_AMP_ADC_PLL_OFF);
++	cfg->speaker_on = false;
++	pr_debug("done");
++	fsm_mutex_unlock();
++}
++//+bug 537023, baoshulin@wingtech.com, 20200316,  update fs18xx add switch channle 
++int fsm_flip_angle(void)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	if(cfg->next_angle >= 270) return 3;
++	if(cfg->next_angle >= 180) return 2;
++	if(cfg->next_angle >= 90) return 1;
++	if(cfg->next_angle >= 0) return 0;
++	return 0;
++}
++
++void fsm_stereo_flip(int next_angle)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	fsm_dev_t *fsm_dev = NULL;
++
++	if (next_angle >= 360) { // angle range: [0 ~ 359]
++		next_angle %= 360;
++	}
++	if (cfg->cur_angle == next_angle) {
++		pr_info("cur_angle:%d, angle:%d", cfg->cur_angle, next_angle);
++		return;
++	}
++	fsm_mutex_lock();
++	pr_info("scene:%04X, angle:%d", cfg->next_scene, next_angle);
++	cfg->next_angle = next_angle;
++//ExtB611022, wangchengqiang.wt, modify for angle switch fail
++	cfg->cur_angle = cfg->next_angle;
++	if (cfg->stream_muted || !(cfg->next_scene & FSM_SCENE_MUSIC)) {
++		fsm_mutex_unlock();
++		pr_info("Not do swich !!!");
++		return;
++	}
++	fsm_list_func_arg(fsm_dev, fsm_swap_channel, cfg->next_angle);
++	fsm_mutex_unlock();
++}
++
++void fsm_batv_monitor(void)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	struct fsm_vbat_state *vbat_state;
++	fsm_dev_t *fsm_dev = NULL;
++
++	vbat_state = &g_vbat_state;
++	if (cfg->skip_monitor || !vbat_state) {
++		return;
++	}
++	fsm_mutex_lock();
++	vbat_state->cur_batv = 0;
++	// get current batv(min) from smartpa (or from charge ic)
++	fsm_list_func(fsm_dev, fsm_get_vbat);
++	pr_info("cur_batv:%d", vbat_state->cur_batv);
++	// update volume when:
++	// 1) cur_vbat lower last_batv - step
++	// 2) vbat rised FSM_VBATH_COUNT times (charging)
++	// 3) the first time checking (last_batv = 0)
++	if ((vbat_state->cur_batv <= vbat_state->last_batv - FSM_VBAT_STEP)
++			|| (vbat_state->batvh_count >= FSM_VBATH_COUNT)
++			|| (vbat_state->last_batv == 0)) {
++		// update volume
++		fsm_list_func(fsm_dev, fsm_config_vol);
++		// update last batv
++		vbat_state->last_batv = vbat_state->cur_batv;
++		// clear batv rised count
++		vbat_state->batvh_count = 0;
++	}
++	else if (vbat_state->cur_batv >= vbat_state->last_batv + FSM_VBAT_STEP) {
++		// batv rised
++		vbat_state->batvh_count++;
++	}
++	fsm_mutex_unlock();
++}
++
++void fsm_re25_test(bool force)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	fsm_dev_t *fsm_dev = NULL;
++	int retry;
++	int ret;
++
++	fsm_mutex_lock();
++	pr_info("start testing");
++	cfg->skip_monitor = true;
++	cfg->test_type = TEST_RE25;
++	cfg->force_calib = force;
++	cfg->stop_test = false;
++	fsm_mutex_unlock();
++	// check play audio or not
++	ret = fsm_list_wait(FSM_WAIT_STATUS_ON);
++	if (ret) {
++		pr_err("wait status timeout!");
++		// return; // go ahead to clean data in pre calib
++	}
++	fsm_mutex_lock();
++	fsm_list_func(fsm_dev, fsm_stub_pre_calib);
++	fsm_delay_ms(2500); // 2500ms
++	for (retry = 1; retry <= FSM_WAIT_STABLE_RETRY; retry++) {
++		if (cfg->stop_test) {
++			break;
++		}
++		fsm_delay_ms(100); // 100ms
++		fsm_list_return(fsm_dev, fsm_cal_zmdata, ret);
++		if (!ret) {
++			break;
++		}
++	}
++	pr_info("retry %d times, max:%d", retry, FSM_WAIT_STABLE_RETRY);
++	fsm_list_func(fsm_dev, fsm_stub_post_calib);
++	cfg->test_type = TEST_NONE;
++	fsm_list_func_arg(fsm_dev, fsm_stub_set_mute, false);
++	fsm_list_wait(FSM_WAIT_AMP_ADC_ON);
++	fsm_delay_ms(10); // ms
++	fsm_list_func_arg(fsm_dev, fsm_stub_set_tsignal, true);
++	cfg->force_calib = false;
++	cfg->skip_monitor = false;
++	pr_debug("done");
++	fsm_mutex_unlock();
++}
++
++void fsm_f0_test(void)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	fsm_dev_t *fsm_dev = NULL;
++	int freq;
++	int ret;
++
++	fsm_mutex_lock();
++	pr_info("start testing");
++	cfg->skip_monitor = true;
++	cfg->test_type = TEST_F0;
++	cfg->stop_test = false;
++	fsm_mutex_unlock();
++	ret = fsm_list_wait(FSM_WAIT_STATUS_ON);
++	if (ret) {
++		pr_err("wait status timeout!");
++		// return; // go ahead to clean data in pre f0 test
++	}
++	fsm_mutex_lock();
++	fsm_list_entry(fsm_dev, fsm_dev->dev_ops.pre_f0_test);
++	for (freq = FREQ_START; freq <= FREQ_END; freq += F0_FREQ_STEP) {
++		if (cfg->stop_test) {
++			break;
++		}
++		cfg->test_freq = freq;
++		fsm_list_entry(fsm_dev, fsm_dev->dev_ops.f0_test);
++		fsm_delay_ms((freq != FREQ_START ? F0_TEST_DELAY_MS : 800)); // ms
++		fsm_list_return(fsm_dev, fsm_cal_zmdata, ret);
++	}
++	fsm_list_entry(fsm_dev, fsm_dev->dev_ops.post_f0_test);
++	fsm_delay_ms(35); // 35ms
++	cfg->test_type = TEST_NONE;
++	// force init device
++	cfg->force_init = true;
++	cfg->force_scene = true;
++	pr_debug("done");
++	fsm_mutex_unlock();
++	fsm_speaker_onn();
++	cfg->force_init = false;
++	cfg->force_scene = false;
++}
++
++int fsm_test_result(struct fsm_cal_result *result)
++{
++	struct preset_file *pfile;
++	struct dev_list *dev_list;
++	fsm_dev_t *fsm_dev;
++	uint8_t *preset;
++	int dev;
++
++	pfile = fsm_get_presets();
++	if (!result || !pfile) {
++		pr_err("invalid parameters");
++		return -EINVAL;
++	}
++	preset = (uint8_t *)pfile;
++	result->ndev = pfile->hdr.ndev;
++	result->freq_start = FREQ_START;
++	result->freq_end = FREQ_END;
++	result->freq_step = F0_FREQ_STEP;
++	if (pfile->hdr.ndev > FSM_DEV_MAX) {
++		pr_err("invalid ndev:%d", pfile->hdr.ndev);
++		return -EINVAL;
++	}
++	for (dev = 0; dev < result->ndev; dev++) {
++		if (FSM_DSC_DEV_INFO != pfile->index[dev].type) {
++			continue;
++		}
++		dev_list = (struct dev_list *)&preset[pfile->index[dev].offset];
++		result->data[dev].addr = dev_list->addr;
++		fsm_dev = fsm_get_fsm_dev(dev_list->addr);
++		if (fsm_dev && fsm_dev->tdata) {
++			result->data[dev].pos = fsm_dev->pos_mask;
++			result->data[dev].re25 = fsm_dev->tdata->test_re25;
++			result->data[dev].count = fsm_dev->cal_count;
++			result->data[dev].f0 = fsm_dev->f0;
++			memcpy(result->data[dev].f0_zm, fsm_dev->tdata->f0.zmdata,
++					sizeof(result->data[dev].f0_zm));
++			result->data[dev].errcode = fsm_dev->errcode;
++                        pr_addr(err, "f0 = %d", fsm_dev->f0);
++		}
++		else {
++			pr_addr(err, "invalid data");
++		}
++	}
++	pr_info("result->ndev:%d", result->ndev);
++
++	return 0;
++}
++
++void fsm_deinit(void)
++{
++	fsm_dev_t *fsm_dev = NULL;
++
++	fsm_mutex_lock();
++	if (fsm_dev_count() <= 0) {
++		fsm_mutex_unlock();
++		return;
++	}
++	fsm_list_func(fsm_dev, fsm_stub_dev_deinit);
++	fsm_firmware_deinit();
++	fsm_mutex_unlock();
++	fsm_hal_close();
++}
+diff --git a/sound/soc/codecs/foursemi/fsm_firmware.c b/sound/soc/codecs/foursemi/fsm_firmware.c
+new file mode 100644
+index 000000000..2218e5b09
+--- /dev/null
++++ b/sound/soc/codecs/foursemi/fsm_firmware.c
+@@ -0,0 +1,135 @@
++/**
++ * Copyright (C) Fourier Semiconductor Inc. 2016-2020. All rights reserved.
++ * 2019-02-22 File created.
++ */
++
++#if defined(CONFIG_FSM_FIRMWARE)
++#include "fsm_public.h"
++#include <linux/firmware.h>
++#include <linux/slab.h>
++
++static int g_fsm_fw_init = 0;
++
++#ifdef FSM_UNUSED_CODE
++static void *fsm_devm_kzalloc(struct device *dev, void *buf, size_t size)
++{
++	char *devm_buf = devm_kzalloc(dev, size, GFP_KERNEL);
++
++	if (!devm_buf) {
++		return devm_buf;
++	} else {
++		memcpy(devm_buf, buf, size);
++	}
++
++	return devm_buf;
++}
++
++static void fsm_devm_kfree(struct device *dev, void *buf)
++{
++	if (buf) {
++		devm_kfree(dev, buf);
++		buf = NULL;
++	}
++}
++#endif
++
++static void fsm_firmware_inited(const struct firmware *cont, void *context)
++{
++	struct device *dev = (struct device *)context;
++	int ret;
++
++	if (dev == NULL || cont == NULL) {
++		pr_err("bad parameter");
++		return;
++	}
++
++	pr_info("size: %zu", cont->size);
++	fsm_mutex_lock();
++	ret = fsm_parse_preset(cont->data, (uint32_t)cont->size);
++	fsm_mutex_unlock();
++	release_firmware(cont);
++	if (ret) {
++		pr_err("parse firmware fail: %d", ret);
++		g_fsm_fw_init = 0;
++	}
++}
++
++int fsm_firmware_init(char *fw_name)
++{
++	struct device *dev;
++	int ret;
++
++	if (fw_name == NULL) {
++		pr_err("invalid firmware name");
++		return -EINVAL;
++	}
++	if (fsm_get_presets() || g_fsm_fw_init) {
++		return MODULE_INITED;
++	}
++	dev = fsm_get_pdev();
++	if (dev == NULL) {
++		pr_err("invalid device");
++		return -EINVAL;
++	}
++
++	pr_info("loading %s in nowait mode", fw_name);
++	ret = request_firmware_nowait(THIS_MODULE, FW_ACTION_UEVENT,
++			fw_name, dev, GFP_KERNEL,
++			dev, fsm_firmware_inited);
++	if (ret) {
++		pr_err("request %s failed: %d\n", fw_name, ret);
++		return ret;
++	}
++	g_fsm_fw_init = 1;
++
++	return ret;
++}
++
++int fsm_firmware_init_sync(char *fw_name)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	const struct firmware *fw_cont;
++	struct device *dev;
++	int ret;
++
++	if (fw_name == NULL) {
++		pr_err("invalid firmware name");
++		return -EINVAL;
++	}
++	if (cfg->force_fw) {
++		pr_info("force loading");
++		cfg->force_fw = false;
++		fsm_set_presets(NULL);
++		g_fsm_fw_init = 0;
++	}
++	if (fsm_get_presets() || g_fsm_fw_init) {
++		return MODULE_INITED;
++	}
++	dev = fsm_get_pdev();
++	if (dev == NULL) {
++		pr_err("invalid device");
++		return -EINVAL;
++	}
++
++	pr_info("loading %s in sync mode", fw_name);
++	ret = request_firmware(&fw_cont, fw_name, dev);
++	if (ret) {
++		pr_err("request %s failed: %d\n", fw_name, ret);
++		return ret;
++	}
++	ret = fsm_parse_preset(fw_cont->data, (uint32_t)fw_cont->size);
++	release_firmware(fw_cont);
++	if (ret) {
++		pr_err("parse firmware fail: %d", ret);
++		return ret;
++	}
++	g_fsm_fw_init = 1;
++
++	return ret;
++}
++
++void fsm_firmware_deinit(void)
++{
++	g_fsm_fw_init = 0;
++}
++#endif
+diff --git a/sound/soc/codecs/foursemi/fsm_i2c.c b/sound/soc/codecs/foursemi/fsm_i2c.c
+new file mode 100644
+index 000000000..d2c03b525
+--- /dev/null
++++ b/sound/soc/codecs/foursemi/fsm_i2c.c
+@@ -0,0 +1,697 @@
++/*
++ * Copyright (C) Fourier Semiconductor Inc. 2016-2020. All rights reserved.
++ */
++#include "fsm_public.h"
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/i2c.h>
++#include <linux/platform_device.h>
++#ifdef CONFIG_OF
++#include <linux/of.h>
++#endif
++#if defined(CONFIG_REGULATOR)
++#include <linux/regulator/consumer.h>
++static struct regulator *g_fsm_vdd = NULL;
++#endif
++//bug 538153, baoshulin@wingtech.com, 20200310, add mmitest and smartpa info
++#include <sound/soc.h>
++
++/* No reset or interrupt lines are wired on the boards supported so far */
++#define gpio_is_valid(gpio)		(false)
++#define gpio_to_irq(gpio)		(-EINVAL)
++#define gpio_set_value_cansleep(gpio, v)	do { } while (0)
++#define gpio_set_value(gpio, v)		do { } while (0)
++#define devm_gpio_free(dev, gpio)	do { } while (0)
++
++static DEFINE_MUTEX(g_fsm_mutex);
++static struct device *g_fsm_pdev = NULL;
++
++/* customize configrature */
++#include "fsm_firmware.c"
++#include "fsm_codec.c"
++
++void fsm_mutex_lock(void)
++{
++	mutex_lock(&g_fsm_mutex);
++}
++
++void fsm_mutex_unlock(void)
++{
++	mutex_unlock(&g_fsm_mutex);
++}
++
++int fsm_i2c_reg_read(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t *pVal)
++{
++	struct i2c_msg msgs[2];
++	uint8_t retries = 0;
++	uint8_t buffer[2];
++	int ret;
++
++	if (!fsm_dev || !fsm_dev->i2c || !pVal) {
++		return -EINVAL;
++	}
++
++	// write register address.
++	msgs[0].addr = fsm_dev->i2c->addr;
++	msgs[0].flags = 0;
++	msgs[0].len = 1;
++	msgs[0].buf = &reg;
++	// read register buffer.
++	msgs[1].addr = fsm_dev->i2c->addr;
++	msgs[1].flags = I2C_M_RD;
++	msgs[1].len = 2;
++	msgs[1].buf = &buffer[0];
++
++	do {
++		mutex_lock(&fsm_dev->i2c_lock);
++		ret = i2c_transfer(fsm_dev->i2c->adapter, &msgs[0], ARRAY_SIZE(msgs));
++		mutex_unlock(&fsm_dev->i2c_lock);
++		if (ret != ARRAY_SIZE(msgs)) {
++			fsm_delay_ms(5);
++			retries++;
++		}
++	} while (ret != ARRAY_SIZE(msgs) && retries < FSM_I2C_RETRY);
++
++	if (ret != ARRAY_SIZE(msgs)) {
++		pr_err("read %02x transfer error: %d", reg, ret);
++		return -EIO;
++	}
++
++	*pVal = ((buffer[0] << 8) | buffer[1]);
++
++	return 0;
++}
++
++int fsm_i2c_reg_write(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t val)
++{
++	struct i2c_msg msgs[1];
++	uint8_t retries = 0;
++	uint8_t buffer[3];
++	int ret;
++
++	if (!fsm_dev || !fsm_dev->i2c) {
++		return -EINVAL;
++	}
++
++	buffer[0] = reg;
++	buffer[1] = (val >> 8) & 0x00ff;
++	buffer[2] = val & 0x00ff;
++	msgs[0].addr = fsm_dev->i2c->addr;
++	msgs[0].flags = 0;
++	msgs[0].len = sizeof(buffer);
++	msgs[0].buf = &buffer[0];
++
++	do {
++		mutex_lock(&fsm_dev->i2c_lock);
++		ret = i2c_transfer(fsm_dev->i2c->adapter, &msgs[0], ARRAY_SIZE(msgs));
++		mutex_unlock(&fsm_dev->i2c_lock);
++		if (ret != ARRAY_SIZE(msgs)) {
++			fsm_delay_ms(5);
++			retries++;
++		}
++	} while (ret != ARRAY_SIZE(msgs) && retries < FSM_I2C_RETRY);
++
++	if (ret != ARRAY_SIZE(msgs)) {
++		pr_err("write %02x transfer error: %d", reg, ret);
++		return -EIO;
++	}
++
++	return 0;
++}
++
++int fsm_i2c_bulkwrite(fsm_dev_t *fsm_dev, uint8_t reg,
++				uint8_t *data, int len)
++{
++	uint8_t retries = 0;
++	uint8_t *buf;
++	int size;
++	int ret;
++
++	if (!fsm_dev || !fsm_dev->i2c || !data) {
++		return -EINVAL;
++	}
++
++	size = sizeof(uint8_t) + len;
++	buf = (uint8_t *)fsm_alloc_mem(size);
++	if (!buf) {
++		pr_err("alloc memery failed");
++		return -ENOMEM;
++	}
++
++	buf[0] = reg;
++	memcpy(&buf[1], data, len);
++	do {
++		mutex_lock(&fsm_dev->i2c_lock);
++		ret = i2c_master_send(fsm_dev->i2c, buf, size);
++		mutex_unlock(&fsm_dev->i2c_lock);
++		if (ret < 0) {
++			fsm_delay_ms(5);
++			retries++;
++		} else if (ret == size) {
++			break;
++		}
++	} while (ret != size && retries < FSM_I2C_RETRY);
++
++	fsm_free_mem(buf);
++
++	if (ret != size) {
++		pr_err("write %02x transfer error: %d", reg, ret);
++		return -EIO;
++	}
++
++	return 0;
++}
++
++bool fsm_set_pdev(struct device *dev)
++{
++	if (g_fsm_pdev == NULL || dev == NULL) {
++		g_fsm_pdev = dev;
++		return true;
++	}
++	return false; // already got device
++}
++
++struct device *fsm_get_pdev(void)
++{
++	return g_fsm_pdev;
++}
++
++int fsm_vddd_on(struct device *dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	int ret = 0;
++
++	if (!cfg || cfg->vddd_on) {
++		return 0;
++	}
++#if defined(CONFIG_REGULATOR)
++	g_fsm_vdd = regulator_get(dev, "fsm_vddd");
++	if (IS_ERR(g_fsm_vdd) != 0) {
++		pr_err("error getting fsm_vddd regulator");
++		ret = PTR_ERR(g_fsm_vdd);
++		g_fsm_vdd = NULL;
++		return ret;
++	}
++	pr_info("enable regulator");
++	regulator_set_voltage(g_fsm_vdd, 1800000, 1800000);
++	ret = regulator_enable(g_fsm_vdd);
++	if (ret < 0) {
++		pr_err("enabling fsm_vddd failed: %d", ret);
++	}
++#endif
++	cfg->vddd_on = 1;
++	fsm_delay_ms(10);
++
++	return ret;
++}
++
++void fsm_vddd_off(void)
++{
++	fsm_config_t *cfg = fsm_get_config();
++
++	if (!cfg || !cfg->vddd_on || cfg->dev_count > 0) {
++		return;
++	}
++#if defined(CONFIG_REGULATOR)
++	if (g_fsm_vdd) {
++		pr_info("disable regulator");
++		regulator_disable(g_fsm_vdd);
++		regulator_put(g_fsm_vdd);
++		g_fsm_vdd = NULL;
++	}
++#endif
++	cfg->vddd_on = 0;
++}
++
++void *fsm_devm_kstrdup(struct device *dev, void *buf, size_t size)
++{
++	char *devm_buf = devm_kzalloc(dev, size + 1, GFP_KERNEL);
++
++	if (!devm_buf) {
++		return devm_buf;
++	}
++	memcpy(devm_buf, buf, size);
++
++	return devm_buf;
++}
++
++int fsm_set_monitor(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	int use_irq;
++
++	if (!cfg || !fsm_dev || !fsm_dev->fsm_wq) {
++		return -EINVAL;
++	}
++	use_irq = fsm_dev->use_irq;
++	if (cfg->skip_monitor) {
++		if (use_irq && fsm_dev->irq_id > 0) {
++			disable_irq(fsm_dev->irq_id);
++		}
++		else {
++			if (delayed_work_pending(&fsm_dev->monitor_work)) {
++				cancel_delayed_work_sync(&fsm_dev->monitor_work);
++			}
++		}
++	}
++	else {
++		if (use_irq && fsm_dev->irq_id > 0) {
++			enable_irq(fsm_dev->irq_id);
++		}
++		else {
++			queue_delayed_work(fsm_dev->fsm_wq,
++					&fsm_dev->monitor_work, 5*HZ);
++		}
++	}
++
++	return 0;
++}
++
++static int fsm_ext_reset(fsm_dev_t *fsm_dev)
++{
++	fsm_config_t *cfg = fsm_get_config();
++
++	if (cfg == NULL || fsm_dev == NULL) {
++		return 0;
++	}
++	if (cfg->reset_chip) {
++		return 0;
++	}
++	if (fsm_dev && gpio_is_valid(fsm_dev->rst_gpio)) {
++		gpio_set_value_cansleep(fsm_dev->rst_gpio, 0);
++		fsm_delay_ms(10); // mdelay
++		gpio_set_value_cansleep(fsm_dev->rst_gpio, 1);
++		fsm_delay_ms(1); // mdelay
++		cfg->reset_chip = true;
++	}
++
++	return 0;
++}
++
++static irqreturn_t fsm_irq_hander(int irq, void *data)
++{
++	fsm_dev_t *fsm_dev = data;
++
++	queue_delayed_work(fsm_dev->fsm_wq, &fsm_dev->interrupt_work, 0);
++
++	return IRQ_HANDLED;
++}
++
++static void fsm_work_monitor(struct work_struct *work)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	fsm_dev_t *fsm_dev;
++
++	fsm_dev = container_of(work, struct fsm_dev, monitor_work.work);
++	if (!cfg || cfg->skip_monitor || !fsm_dev) {
++		return;
++	}
++	fsm_mutex_lock();
++	fsm_dev_recover(fsm_dev);
++	fsm_mutex_unlock();
++	/* reschedule */
++	queue_delayed_work(fsm_dev->fsm_wq, &fsm_dev->monitor_work,
++			2*HZ);
++
++}
++
++static void fsm_work_interrupt(struct work_struct *work)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	fsm_dev_t *fsm_dev;
++
++	fsm_mutex_lock();
++	fsm_dev = container_of(work, struct fsm_dev, interrupt_work.work);
++	if (!cfg || cfg->skip_monitor || !fsm_dev) {
++		fsm_mutex_unlock();
++		return;
++	}
++	fsm_dev_recover(fsm_dev);
++
++	fsm_mutex_unlock();
++}
++
++static int fsm_request_irq(fsm_dev_t *fsm_dev)
++{
++	struct i2c_client *i2c;
++	int irq_flags;
++	int ret;
++
++	if (fsm_dev == NULL || fsm_dev->i2c == NULL) {
++		return -EINVAL;
++	}
++	fsm_dev->irq_id = -1;
++	if (!fsm_dev->use_irq || !gpio_is_valid(fsm_dev->irq_gpio)) {
++		pr_addr(info, "skip to request irq");
++		return 0;
++	}
++	i2c = fsm_dev->i2c;
++	/* register irq handler */
++	fsm_dev->irq_id = gpio_to_irq(fsm_dev->irq_gpio);
++	if (fsm_dev->irq_id <= 0) {
++		dev_err(&i2c->dev, "invalid irq %d\n", fsm_dev->irq_id);
++		return -EINVAL;
++	}
++	irq_flags = IRQF_TRIGGER_FALLING | IRQF_ONESHOT;
++	ret = devm_request_threaded_irq(&i2c->dev, fsm_dev->irq_id,
++				NULL, fsm_irq_hander, irq_flags, "fs18xx", fsm_dev);
++	if (ret) {
++		dev_err(&i2c->dev, "failed to request IRQ %d: %d\n",
++				fsm_dev->irq_id, ret);
++		return ret;
++	}
++	disable_irq(fsm_dev->irq_id);
++
++	return 0;
++}
++
++#ifdef CONFIG_OF
++static int fsm_parse_dts(struct i2c_client *i2c, fsm_dev_t *fsm_dev)
++{
++	struct device_node *np = i2c->dev.of_node;
++	char const *position;
++	int ret;
++
++	if (fsm_dev == NULL || np == NULL) {
++		return -EINVAL;
++	}
++
++	fsm_dev->rst_gpio = -1;
++	fsm_dev->irq_gpio = -1;
++	(void)ret;
++
++	if (of_property_read_string(np, "fsm,position", &position)) {
++		fsm_dev->pos_mask = FSM_POS_MONO; // mono
++		return 0;
++	}
++	if (!strcmp(position, "LTOP")) {
++		fsm_dev->pos_mask = FSM_POS_LTOP;
++	}
++	else if (!strcmp(position, "RBTM")) {
++		fsm_dev->pos_mask = FSM_POS_RBTM;
++	}
++	else if (!strcmp(position, "LBTM")) {
++		fsm_dev->pos_mask = FSM_POS_LBTM;
++	}
++	else if (!strcmp(position, "RTOP")) {
++		fsm_dev->pos_mask = FSM_POS_RTOP;
++	}
++	else {
++		fsm_dev->pos_mask = FSM_POS_MONO;
++	}
++
++	return 0;
++}
++
++static struct of_device_id fsm_match_tbl[] =
++{
++	{ .compatible = "foursemi,fs18xx" },
++	{},
++};
++MODULE_DEVICE_TABLE(of, fsm_match_tbl);
++#endif
++
++static int fsm_i2c_probe(struct i2c_client *i2c)
++{
++	fsm_config_t *cfg = fsm_get_config();
++	fsm_dev_t *fsm_dev;
++	int ret;
++	pr_info("audiock fsm %s\n",__func__);
++	pr_debug("enter");
++	if (!i2c_check_functionality(i2c->adapter, I2C_FUNC_I2C)) {
++		dev_err(&i2c->dev, "check I2C_FUNC_I2C failed");
++		return -EIO;
++	}
++
++	fsm_dev = devm_kzalloc(&i2c->dev, sizeof(fsm_dev_t), GFP_KERNEL);
++	if (fsm_dev == NULL) {
++		dev_err(&i2c->dev, "alloc memory fialed");
++		return -ENOMEM;
++	}
++
++	memset(fsm_dev, 0, sizeof(fsm_dev_t));
++	mutex_init(&fsm_dev->i2c_lock);
++	fsm_dev->i2c = i2c;
++
++#ifdef CONFIG_OF
++	ret = fsm_parse_dts(i2c, fsm_dev);
++	if (ret) {
++		dev_err(&i2c->dev, "failed to parse DTS node");
++	}
++#endif
++#if defined(CONFIG_FSM_REGMAP)
++	fsm_dev->regmap = fsm_regmap_i2c_init(i2c);
++	if (fsm_dev->regmap == NULL) {
++		devm_kfree(&i2c->dev, fsm_dev);
++		dev_err(&i2c->dev, "regmap init fialed");
++		return -EINVAL;
++	}
++#endif
++
++	fsm_vddd_on(&i2c->dev);
++	fsm_ext_reset(fsm_dev);
++	ret = fsm_probe(fsm_dev, i2c->addr);
++	if (ret) {
++		dev_err(&i2c->dev, "detect device failed");
++#if defined(CONFIG_FSM_REGMAP)
++		fsm_regmap_i2c_deinit(fsm_dev->regmap);
++#endif
++		devm_kfree(&i2c->dev, fsm_dev);
++		return ret;
++	}
++
++#if !defined(CONFIG_FSM_CODEC)
++	/* it doesn't register codec, we use the first device to request firmware,
++	 * all operations in misc device */
++	fsm_set_pdev(&i2c->dev);
++#endif
++	fsm_dev->id = cfg->dev_count - 1;
++	i2c_set_clientdata(i2c, fsm_dev);
++	pr_addr(info, "audiock index:%d", fsm_dev->id);
++	fsm_dev->fsm_wq = create_singlethread_workqueue("fs18xx");
++	INIT_DELAYED_WORK(&fsm_dev->monitor_work, fsm_work_monitor);
++	INIT_DELAYED_WORK(&fsm_dev->interrupt_work, fsm_work_interrupt);
++	fsm_request_irq(fsm_dev);
++
++	/* One amplifier node carries the DAI and drives the whole group */
++	fsm_dev->has_codec = of_property_present(i2c->dev.of_node, "#sound-dai-cells");
++	fsm_dev->has_sys = fsm_dev->has_codec;
++	if(fsm_dev->has_sys) {
++		fsm_sysfs_init(&i2c->dev);
++	}
++	if (fsm_dev->has_codec) {
++		fsm_codec_register(&i2c->dev, fsm_dev->id);
++	}
++
++	dev_info(&i2c->dev, "audiock i2c probe completed");
++	pr_info("audiock fsm %s\n end",__func__);
++	return 0;
++}
++
++static void fsm_i2c_remove(struct i2c_client *i2c)
++{
++	fsm_dev_t *fsm_dev = i2c_get_clientdata(i2c);
++
++	pr_debug("enter");
++	if (fsm_dev == NULL) {
++		pr_err("bad parameter");
++		return;
++	}
++	if (fsm_dev->fsm_wq) {
++		cancel_delayed_work_sync(&fsm_dev->interrupt_work);
++		cancel_delayed_work_sync(&fsm_dev->monitor_work);
++		destroy_workqueue(fsm_dev->fsm_wq);
++	}
++#if defined(CONFIG_FSM_REGMAP)
++	fsm_regmap_i2c_deinit(fsm_dev->regmap);
++#endif
++	if (fsm_dev->has_codec) {
++		fsm_codec_unregister(&i2c->dev);
++	}
++	if (fsm_dev->has_sys) {
++		fsm_sysfs_deinit(&i2c->dev);
++	}
++
++	fsm_remove(fsm_dev);
++	fsm_vddd_off();
++	if (gpio_is_valid(fsm_dev->irq_gpio)) {
++		devm_gpio_free(&i2c->dev, fsm_dev->irq_gpio);
++	}
++	if (gpio_is_valid(fsm_dev->rst_gpio)) {
++		devm_gpio_free(&i2c->dev, fsm_dev->rst_gpio);
++	}
++	if (fsm_dev != NULL) {
++		devm_kfree(&i2c->dev, fsm_dev);
++	}
++	dev_info(&i2c->dev, "i2c removed");
++}
++
++static const struct i2c_device_id fsm_i2c_id[] =
++{
++	{ "fs18xx", 0 },
++	{ }
++};
++
++MODULE_DEVICE_TABLE(i2c, fsm_i2c_id);
++
++static struct i2c_driver fsm_i2c_driver =
++{
++	.driver = {
++		.name  = FSM_DRV_NAME,
++#ifdef CONFIG_OF
++		.of_match_table = of_match_ptr(fsm_match_tbl),
++#endif
++	},
++	.probe    = fsm_i2c_probe,
++	.remove   = fsm_i2c_remove,
++	.id_table = fsm_i2c_id,
++};
++
++int fsm_i2c_init(void)
++{
++	return i2c_add_driver(&fsm_i2c_driver);
++}
++
++void fsm_i2c_exit(void)
++{
++	pr_info("enter");
++	i2c_del_driver(&fsm_i2c_driver);
++}
++
++#ifdef CONFIG_FSM_STUB
++static int fsm_plat_probe(struct platform_device *pdev)
++{
++	int ret;
++
++	if (0) { //(pdev->dev.of_node) {
++		dev_set_name(&pdev->dev, "%s", "fsm-codec-stub");
++	}
++	pr_info("dev_name: %s", dev_name(&pdev->dev));
++	fsm_vddd_on(&pdev->dev);
++	// path: /sys/i2c-fsm/
++	ret = fsm_sysfs_init(&pdev->dev);
++	ret = fsm_codec_register(&pdev->dev, 0);
++	ret = fsm_i2c_init();
++	if (ret) {
++		pr_err("i2c init failed: %d", ret);
++		fsm_codec_unregister(&pdev->dev);
++		fsm_sysfs_deinit(&pdev->dev);
++		return ret;
++	}
++
++	return 0;
++}
++
++static int fsm_plat_remove(struct platform_device *pdev)
++{
++	pr_debug("enter");
++	fsm_codec_unregister(&pdev->dev);
++	fsm_sysfs_deinit(&pdev->dev);
++	fsm_i2c_exit();
++	fsm_vddd_off();
++	dev_info(&pdev->dev, "platform removed");
++
++	return 0;
++}
++
++#ifdef CONFIG_OF
++static struct of_device_id fsm_codec_stub_dt_match[] = {
++	{ .compatible = "foursemi,fsm-codec-stub" },
++	{},
++};
++MODULE_DEVICE_TABLE(of, fsm_codec_stub_dt_match);
++#else
++static struct platform_device *soc_fsm_device;
++#endif
++
++static struct platform_driver soc_fsm_driver = {
++	.driver = {
++		.name = "fsm-codec-stub",
++		.owner = THIS_MODULE,
++#ifdef CONFIG_OF
++		.of_match_table = fsm_codec_stub_dt_match,
++#endif
++	},
++	.probe = fsm_plat_probe,
++	.remove = fsm_plat_remove,
++};
++
++static int fsm_stub_init(void)
++{
++	int ret;
++
++#ifndef CONFIG_OF
++	// soc_fsm_device = platform_device_alloc("fsm-codec-stub", -1);
++	soc_fsm_device = platform_device_register_simple("fsm-codec-stub",
++				-1, NULL, 0);
++	if (IS_ERR(soc_fsm_device)) {
++		pr_err("register device failed");
++		// return -ENOMEM;
++		return PTR_ERR(soc_fsm_device);
++	}
++
++	ret = platform_device_add(soc_fsm_device);
++	if (ret != 0) {
++		platform_device_put(soc_fsm_device);
++		return ret;
++	}
++#endif
++	ret = platform_driver_register(&soc_fsm_driver);
++	if (ret) {
++		pr_err("register driver failed: %d", ret);
++	}
++
++	return ret;
++}
++
++static void fsm_stub_exit(void)
++{
++#ifndef CONFIG_OF
++	if (!IS_ERR(soc_fsm_device)) {
++		platform_device_unregister(soc_fsm_device);
++	}
++#endif
++	platform_driver_unregister(&soc_fsm_driver);
++}
++#endif // CONFIG_FSM_STUB
++
++static int __init fsm_mod_init(void)
++{
++	int ret;
++
++#ifdef CONFIG_FSM_STUB
++	ret = fsm_stub_init();
++#else
++	ret = fsm_i2c_init();
++#endif
++	if (ret) {
++		pr_err("init fail: %d", ret);
++		return ret;
++	}
++	fsm_misc_init();
++	fsm_proc_init();
++
++	return 0;
++}
++
++static void __exit fsm_mod_exit(void)
++{
++	fsm_proc_deinit();
++	fsm_misc_deinit();
++#ifdef CONFIG_FSM_STUB
++	fsm_stub_exit();
++#else
++	fsm_i2c_exit();
++#endif
++}
++
++//module_i2c_driver(fsm_i2c_driver);
++module_init(fsm_mod_init);
++module_exit(fsm_mod_exit);
++
++MODULE_AUTHOR("FourSemi SW <support@foursemi.com>");
++MODULE_DESCRIPTION("FourSemi Smart PA Driver");
++MODULE_VERSION(FSM_CODE_VERSION);
++MODULE_ALIAS("foursemi:"FSM_DRV_NAME);
++MODULE_LICENSE("GPL");
++
+diff --git a/sound/soc/codecs/foursemi/fsm_list.h b/sound/soc/codecs/foursemi/fsm_list.h
+new file mode 100644
+index 000000000..463d1f5fe
+--- /dev/null
++++ b/sound/soc/codecs/foursemi/fsm_list.h
+@@ -0,0 +1,144 @@
++#ifndef _LINUX_LIST_H
++#define _LINUX_LIST_H
++
++#undef offsetof
++#define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
++
++/**
++ * container_of - cast a member of a structure out to the containing structure
++ * @ptr:        the pointer to the member.
++ * @type:       the type of the container struct this is embedded in.
++ * @member:     the name of the member within the struct.
++ *
++ */
++#define container_of(ptr, type, member) ({ \
++	const typeof( ((type *)0)->member ) *__mptr = (ptr); \
++	(type *)( (char *)__mptr - offsetof(type,member) );})
++
++struct list_head {
++	struct list_head *next, *prev;
++};
++
++#define LIST_HEAD_INIT(name) { &(name), &(name) }
++
++#define LIST_HEAD(name) \
++	struct list_head name = LIST_HEAD_INIT(name)
++
++static inline void INIT_LIST_HEAD(struct list_head *list)
++{
++	list->next = list;
++	list->prev = list;
++}
++
++/**
++ * list_entry - get the struct for this entry
++ * @ptr:	the &struct list_head pointer.
++ * @type:	the type of the struct this is embedded in.
++ * @member:	the name of the list_struct within the struct.
++ */
++#define list_entry(ptr, type, member) \
++	container_of(ptr, type, member)
++
++/**
++ * list_for_each_entry	-	iterate over list of given type
++ * @pos:	the type * to use as a loop cursor.
++ * @head:	the head for your list.
++ * @member:	the name of the list_struct within the struct.
++ */
++#define list_for_each_entry(pos, head, member) \
++	for (pos = list_entry((head)->next, typeof(*pos), member); \
++		&pos->member != (head); \
++		pos = list_entry(pos->member.next, typeof(*pos), member))
++
++/**
++ * list_for_each_entry_safe - iterate over list of given type safe against removal of list entry
++ * @pos:	the type * to use as a loop cursor.
++ * @n:		another type * to use as temporary storage
++ * @head:	the head for your list.
++ * @member:	the name of the list_struct within the struct.
++ */
++#define list_for_each_entry_safe(pos, n, head, member) \
++	for (pos = list_entry((head)->next, typeof(*pos), member), \
++		n = list_entry(pos->member.next, typeof(*pos), member); \
++		&pos->member != (head); \
++		pos = n, n = list_entry(n->member.next, typeof(*n), member))
++
++/**
++ * list_empty - tests whether a list is empty
++ * @head: the list to test.
++ */
++static inline int list_empty(const struct list_head *head)
++{
++	return head->next == head;
++}
++
++/*
++ * Insert a new entry between two known consecutive entries.
++ *
++ * This is only for internal list manipulation where we know
++ * the prev/next entries already!
++ */
++static inline void __list_add(struct list_head *_new,
++			struct list_head *prev,
++			struct list_head *next)
++{
++	next->prev = _new;
++	_new->next = next;
++	_new->prev = prev;
++	prev->next = _new;
++}
++
++/**
++ * list_add - add a new entry
++ * @new: new entry to be added
++ * @head: list head to add it after
++ *
++ * Insert a new entry after the specified head.
++ * This is good for implementing stacks.
++ */
++static inline void list_add(struct list_head *new, struct list_head *head)
++{
++	__list_add(new, head, head->next);
++}
++
++/**
++ * list_add_tail - add a new entry
++ * @new: new entry to be added
++ * @head: list head to add it before
++ *
++ * Insert a new entry before the specified head.
++ * This is useful for implementing queues.
++ */
++static inline void list_add_tail(struct list_head *_new, struct list_head *head)
++{
++	__list_add(_new, head->prev, head);
++}
++
++/*
++ * Delete a list entry by making the prev/next entries
++ * point to each other.
++ *
++ * This is only for internal list manipulation where we know
++ * the prev/next entries already!
++ */
++static inline void __list_del(struct list_head *prev, struct list_head *next)
++{
++	next->prev = prev;
++	prev->next = next;
++}
++
++#define LIST_POISON1  ((void *) 0x00100100)
++#define LIST_POISON2  ((void *) 0x00200200)
++/**
++ * list_del - deletes entry from list.
++ * @entry: the element to delete from the list.
++ * Note: list_empty() on entry does not return true after this, the entry is
++ * in an undefined state.
++ */
++static inline void list_del(struct list_head *entry)
++{
++	__list_del(entry->prev, entry->next);
++	entry->next = (struct list_head*)LIST_POISON1;
++	entry->prev = (struct list_head*)LIST_POISON2;
++}
++#endif
+diff --git a/sound/soc/codecs/foursemi/fsm_public.h b/sound/soc/codecs/foursemi/fsm_public.h
+new file mode 100644
+index 000000000..e0ff18e6e
+--- /dev/null
++++ b/sound/soc/codecs/foursemi/fsm_public.h
+@@ -0,0 +1,211 @@
++/**
++ * Copyright (C) Fourier Semiconductor Inc. 2016-2020. All rights reserved.
++ * 2018-10-18 File created.
++ */
++
++#ifndef __FSM_PUBLIC_H__
++#define __FSM_PUBLIC_H__
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#include "fsm-dev.h"
++#include "fsm_reg_bf.h"
++
++/*
++ * module: fsm_regmap
++ */
++#if defined(CONFIG_FSM_REGMAP)
++#include <linux/regmap.h>
++int fsm_regmap_write(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t val);
++int fsm_regmap_bulkwrite(fsm_dev_t *fsm_dev, uint8_t reg, uint8_t *pval, uint32_t len);
++int fsm_regmap_read(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t *pval);
++int fsm_regmap_bulkread(fsm_dev_t *fsm_dev, uint8_t reg, uint8_t *pval, uint32_t len);
++int fsm_regmap_update_bits(fsm_dev_t *fsm_dev, uint8_t reg, uint8_t mask, uint8_t val);
++struct regmap *fsm_regmap_i2c_init(struct i2c_client *i2c);
++int fsm_regmap_i2c_deinit(struct regmap *map);
++#else
++#define fsm_regmap_i2c_deinit(...)
++#endif
++/*
++ * module: fsm_i2c
++ */
++#if defined(CONFIG_FSM_I2C)
++#include <linux/i2c.h>
++bool fsm_set_pdev(struct device *dev);
++struct device *fsm_get_pdev(void);
++void *fsm_devm_kstrdup(struct device *dev, void *buf, size_t size);
++int fsm_i2c_reg_read(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t *pVal);
++int fsm_i2c_reg_write(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t val);
++int fsm_i2c_bulkwrite(fsm_dev_t *fsm_dev, uint8_t reg,
++				uint8_t *data, int len);
++int fsm_i2c_init(void);
++void fsm_i2c_exit(void);
++#endif
++
++void fsm_mutex_lock(void);
++void fsm_mutex_unlock(void);
++
++/*
++ * module: fsm_misc
++ */
++#if defined(CONFIG_FSM_MISC)
++int fsm_misc_init(void);
++void fsm_misc_deinit(void);
++#else
++#define fsm_misc_init(...)
++#define fsm_misc_deinit(...)
++#endif
++
++/*
++ * module: fsm_proc
++ */
++#if defined(CONFIG_FSM_PROC)
++int fsm_proc_init(void);
++void fsm_proc_deinit(void);
++#else
++#define fsm_proc_init(...)
++#define fsm_proc_deinit(...)
++#endif
++
++/*
++ * module: fsm_sysfs
++ */
++#if defined(CONFIG_FSM_SYSFS)
++int fsm_sysfs_init(struct device *dev);
++void fsm_sysfs_deinit(struct device *dev);
++#else
++#define fsm_sysfs_init(...) (-1)
++#define fsm_sysfs_deinit(...)
++#endif
++
++/*
++ * module: fsm_firmware
++ */
++#if defined(CONFIG_FSM_FIRMWARE)
++int fsm_firmware_init(char *fw_name);
++int fsm_firmware_init_sync(char *fw_name);
++void fsm_firmware_deinit(void);
++#elif defined(FSM_HAL_SUPPORT)
++int fsm_firmware_init_sync(char *fw_name);
++void fsm_firmware_deinit(void);
++#else
++#define fsm_firmware_init(...) (-1)
++#define fsm_firmware_init_sync(...) (-1)
++#define fsm_firmware_deinit(...)
++#endif
++
++/*
++ * module: fsm_codec
++ */
++#if defined(CONFIG_FSM_CODEC)
++int fsm_codec_register(struct device *dev, int id);
++void fsm_codec_unregister(struct device *dev);
++#else
++#define fsm_codec_register(...) (-1)
++#define fsm_codec_unregister(...)
++#endif
++
++/*
++ * module: fsm_core
++ */
++fsm_config_t *fsm_get_config(void);
++struct preset_file *fsm_get_presets(void);
++void fsm_set_presets(struct preset_file *file);
++void fsm_get_version(fsm_version_t *version);
++void fsm_delay_ms(uint32_t delay_ms);
++void *fsm_alloc_mem(int size);
++void fsm_free_mem(void *buf);
++uint16_t set_bf_val(uint16_t *pval, const uint16_t bf, const uint16_t bf_val);
++uint16_t get_bf_val(const uint16_t bf, const uint16_t val);
++int fsm_set_bf(fsm_dev_t *fsm_dev, const uint16_t bf, const uint16_t val);
++int fsm_get_bf(fsm_dev_t *fsm_dev, const uint16_t bf, uint16_t *pval);
++int fsm_reg_write(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t val);
++int fsm_reg_read(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t *pval);
++int fsm_reg_update_bits(fsm_dev_t *fsm_dev, reg_unit_t *reg);
++int fsm_reg_update(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t val);
++int fsm_reg_multiread(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t *pval);
++int fsm_burst_write(fsm_dev_t *fsm_dev, uint8_t reg, uint8_t *data, int len);
++struct fsm_dev *fsm_get_fsm_dev(uint8_t addr);
++int fsm_read_vbat(fsm_dev_t *fsm_dev, uint16_t *vbat);
++int fsm_get_srate_bits(fsm_dev_t *fsm_dev, uint32_t srate);
++int fsm_access_key(fsm_dev_t *fsm_dev, int access);
++int fsm_reg_dump(fsm_dev_t *fsm_dev);
++int fsm_init_dev_list(fsm_dev_t *fsm_dev);
++void *fsm_get_list_by_idx(fsm_dev_t *fsm_dev, int idx);
++void *fsm_get_data_list(fsm_dev_t *fsm_dev, int type);
++int fsm_get_spk_info(fsm_dev_t *fsm_dev, uint16_t info_type);
++int zero_bit_counter(uint8_t byte);
++int get_otp_counter(uint16_t byte);
++int get_otp_max_count(fsm_dev_t *fsm_dev);
++void convert_data_to_bytes(uint32_t val, uint8_t *buf);
++int fsm_parse_preset(const void *data, uint32_t size);
++int fsm_swap_channel(fsm_dev_t *fsm_dev, int next_angle);
++int fsm_set_monitor(fsm_dev_t *fsm_dev);
++int fsm_wait_stable(fsm_dev_t *fsm_dev, int type);
++int fsm_parse_otp(fsm_dev_t *fsm_dev, uint16_t value, int *re25, int *count);
++int fsm_dev_recover(fsm_dev_t *fsm_dev);
++
++/*
++ * module: fsm_hal
++ */
++#if defined(FSM_HAL_SUPPORT)
++int fsm_hal_open(void);
++int fsm_hal_reg_read(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t *val);
++int fsm_hal_reg_write(fsm_dev_t *fsm_dev, uint8_t reg, uint16_t val);
++int fsm_hal_bulkwrite(fsm_dev_t *fsm_dev, uint8_t reg, uint8_t *val, uint32_t len);
++void fsm_hal_close(void);
++#else
++#define fsm_hal_open(...) (0)
++#define fsm_hal_close(...)
++#endif
++
++#ifdef CONFIG_FSM_FS1601S
++void fs1601s_ops(fsm_dev_t *fsm_dev);
++#else
++#define fs1601s_ops(...)
++#endif
++
++#ifdef CONFIG_FSM_FS1603
++void fs1603_ops(fsm_dev_t *fsm_dev);
++#else
++#define fs1603_ops(...)
++#endif
++
++#ifdef CONFIG_FSM_FS1801
++void fs1801_ops(fsm_dev_t *fsm_dev);
++#else
++#define fs1801_ops(...)
++#endif
++
++#ifdef CONFIG_FSM_FS1860
++void fs1860_ops(fsm_dev_t *fsm_dev);
++#else
++#define fs1860_ops(...)
++#endif
++
++void fsm_set_fw_name(char *name);
++int fsm_probe(fsm_dev_t *fsm_dev, int addr);
++void fsm_remove(fsm_dev_t *fsm_dev);
++int fsm_dev_count(void);
++void fsm_set_i2s_clocks(uint32_t rate, uint32_t bclk);
++void fsm_set_scene(int scene);
++void fsm_set_volume(int volume);
++void fsm_set_cfg_flag(int pos, int mark);
++void fsm_init(void);
++void fsm_speaker_onn(void);
++void fsm_speaker_off(void);
++void fsm_stereo_flip(int next_angle);
++void fsm_batv_monitor(void);
++int fsm_flip_angle(void);
++void fsm_re25_test(bool force);
++void fsm_f0_test(void);
++int fsm_test_result(struct fsm_cal_result *result);
++void fsm_deinit(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/sound/soc/codecs/foursemi/fsm_reg_bf.h b/sound/soc/codecs/foursemi/fsm_reg_bf.h
+new file mode 100644
+index 000000000..7a36e6d0b
+--- /dev/null
++++ b/sound/soc/codecs/foursemi/fsm_reg_bf.h
+@@ -0,0 +1,218 @@
++/**
++ * Copyright (C) Fourier Semiconductor Inc. 2016-2020. All rights reserved.
++ * 2019-09-20 File created.
++ */
++#ifndef __FSM_REG_BF_H__
++#define __FSM_REG_BF_H__
++
++#define FSM_STATUS         0xF000
++#define FSM_BOVDS          0x0000
++#define FSM_PLLS           0x0100
++#define FSM_OTDS           0x0200
++#define FSM_OVDS           0x0300
++#define FSM_UVDS           0x0400
++#define FSM_OCDS           0x0500
++#define FSM_CLKS           0x0600
++#define FSM_SPKS           0x0A00
++#define FSM_SPKT           0x0B00
++
++#define FSM_BATS           0xF001
++#define FSM_BATV           0x9001
++
++#define FSM_TEMPS          0xF002
++#define FSM_TEMPV          0x8002
++
++#define FSM_ID             0xF003
++#define FSM_REVID          0x7003
++#define FSM_DEVID          0x7803
++
++#define FSM_I2SCTRL        0xF004
++#define FSM_I2SF           0x2004
++#define FSM_CHS12          0x1304
++#define FSM_DISP           0x0A04
++#define FSM_I2SDOE         0x0B04
++#define FSM_I2SSR          0x3C04
++
++#define FSM_ANASTAT        0xF005
++#define FSM_STVBG          0x0005
++#define FSM_STPLL          0x0105
++#define FSM_STBST          0x0205
++#define FSM_STAMP          0x0305
++
++#define FSM_AUDIOCTRL      0xF006
++#define FSM_VOL            0x7806
++
++#define FSM_TEMPSEL        0xF008
++#define FSM_EXTTS          0x8108
++
++#define FSM_SYSCTRL        0xF009
++#define FSM_PWDN           0x0009
++#define FSM_I2CR           0x0109
++#define FSM_AMPE           0x0309
++
++#define FSM_SPKSET         0xF00A
++#define FSM_SPKR           0x190A
++
++#define FSM_OTPACC         0xF00B
++#define FSM_TRIMKEY        0x700B
++#define FSM_REKEY          0x780B
++
++#define FSM_SPKMT01        0xF064
++#define FSM_SPKMT02        0xF065
++#define FSM_SPKMT03        0xF066
++#define FSM_SPKMT04        0xF067
++#define FSM_SPKMT05        0xF068
++#define FSM_SPKMT06        0xF069
++
++#define FSM_STERC1         0xF070
++#define FSM_STERCTRL       0xF07E
++#define FSM_STERGAIN       0xF07F
++#define FSM_SPKSTATUS      0xF080
++
++#define FSM_ACSCTRL        0xF089
++#define FSM_ACS_COE_SEL    0x0489
++#define FSM_MBDRC_EN       0x0789
++#define FSM_EQEN           0x0C89
++#define FSM_ACS_EN         0x0F89
++
++#define FSM_ACSDRC         0xF08A
++#define FSM_DRCS1_EN       0x008A
++#define FSM_DRCS2_EN       0x018A
++#define FSM_DRCS3_EN       0x028A
++#define FSM_DRC_ENV_W      0x188A
++
++#define FSM_ACSDRCS        0xF08B
++
++#define FSM_CHIPINI        0xF090
++#define FSM_INIFINISH      0x0090
++#define FSM_INIOK          0x0190
++
++#define FSM_I2CADD         0xF091
++
++#define FSM_I2SSET         0xF0A0
++#define FSM_BCMP           0x13A0
++#define FSM_LRCLKP         0x05A0
++#define FSM_BCLKP          0x06A0
++#define FSM_I2SOSWAP       0x07A0
++#define FSM_AECSELL        0x28A0
++#define FSM_AECSELR        0x2CA0
++#define FSM_BCLKSTA        0x0FA0
++
++#define FSM_DSPCTRL        0xF0A1
++#define FSM_DCCOEF         0x20A1
++#define FSM_NOFILTEN       0x04A1
++#define FSM_POSTEQEN       0x0BA1
++#define FSM_DSPEN          0x0CA1
++#define FSM_EQCOEFSEL      0x0DA1
++
++#define FSM_DACEQWL        0xF0A2
++#define FSM_DACEQWH        0xF0A3
++#define FSM_DACEQRL        0xF0A4
++#define FSM_DACEQRH        0xF0A5
++#define FSM_DACEQA         0xF0A6
++
++#define FSM_BFLCTRL        0xF0A7
++#define FSM_BFLSET         0xF0A8
++#define FSM_SQC            0xF0A9
++#define FSM_AGC            0xF0AA
++
++#define FSM_DRPARA         0xF0AD
++#define FSM_DRC            0xC0AD
++
++#define FSM_DACCTRL        0xF0AE
++#define FSM_SDMSTLBYP      0x04AE
++#define FSM_DACMUTE        0x08AE
++#define FSM_DACFADE        0x09AE
++
++#define FSM_TSCTRL         0xF0AF
++#define FSM_GAIN           0x20AF
++#define FSM_TSEN           0x03AF
++#define FSM_OFF_THD        0x24AF
++#define FSM_OFF_DELAY      0x28AF
++#define FSM_OFF_ZEROCRS    0x0CAF
++#define FSM_OFF_AUTOEN     0x0DAF
++#define FSM_OFFSTA         0x0EAF
++
++#define FSM_ADCCTRL        0xF0B3
++#define FSM_EQB1EN_R       0x08B3
++#define FSM_EQB0EN_R       0x09B3
++#define FSM_ADCRGAIN       0x1AB3
++#define FSM_ADCREN         0x0CB3
++#define FSM_ADCRSEL        0x0DB3
++
++#define FSM_ADCEQWL        0xF0B4
++#define FSM_ADCEQWH        0xF0B5
++#define FSM_ADCEQRL        0xF0B6
++#define FSM_ADCEQRH        0xF0B7
++#define FSM_ADCEQA         0xF0B8
++#define FSM_ADCENV         0xF0B9
++#define FSM_ADCTIME        0xF0BA
++
++#define FSM_ZMDATA         0xF0BB
++#define FSM_DACENV         0xF0BC
++
++#define FSM_DIGSTAT        0xF0BD
++#define FSM_ADCRUN         0x00BD
++#define FSM_DACRUN         0x01BD
++#define FSM_DSPFLAG        0x03BD
++#define FSM_SSPKM24        0x04BD
++#define FSM_SSPKM6         0x05BD
++#define FSM_SSPKRE         0x06BD
++#define FSM_SSPKFSM        0x3CBD
++
++#define FSM_BSTCTRL        0xF0C0
++#define FSM_DISCHARGE      0x00C0
++#define FSM_DAC_GAIN       0x11C0
++#define FSM_BSTEN          0x03C0
++#define FSM_MODE_CTRL      0x14C0
++#define FSM_ILIM_SEL       0x36C0
++#define FSM_VOUT_SEL       0x3AC0
++#define FSM_SSEND          0x0FC0
++
++#define FSM_PLLCTRL1       0xF0C1
++#define FSM_PLLCTRL2       0xF0C2
++#define FSM_PLLCTRL3       0xF0C3
++
++#define FSM_PLLCTRL4       0xF0C4
++#define FSM_PLLEN          0x00C4
++#define FSM_OSCEN          0x01C4
++#define FSM_ZMEN           0x02C4
++#define FSM_VBGEN          0x03C4
++
++#define FSM_OCCTRL         0xF0C5
++#define FSM_OTCTRL         0xF0C6
++#define FSM_UVCTRL         0xF0C7
++#define FSM_OVCTRL         0xF0C8
++#define FSM_SPKERR         0xF0C9
++#define FSM_SPKM24         0xF0CA
++#define FSM_SPKM6          0xF0CB
++#define FSM_SPKRE          0xF0CC
++#define FSM_SPKMDB         0xF0CD
++#define FSM_ADPBST         0xF0CF
++#define FSM_ANACTRL        0xF0D0
++#define FSM_CLDCTRL        0xF0D3
++#define FSM_REFGEN         0xF0D4
++#define FSM_ZMCONFIG       0xF0D5
++#define FSM_AUXCFG         0xF0D7
++
++#define FSM_OTPCMD         0xF0DC
++#define FSM_OTPCMDR        0x00DC
++#define FSM_OTPCMDW        0x01DC
++#define FSM_OTPBUSY        0x02DC
++#define FSM_EPROM_LD       0x08DC
++#define FSM_OTPPGW         0x0CDC
++
++#define FSM_OTPADDR        0xF0DD
++#define FSM_OTPWDATA       0xF0DE
++#define FSM_OTPRDATA       0xF0DF
++#define FSM_OTPPG0W0       0xF0E0
++#define FSM_OTPPG0W1       0xF0E1
++#define FSM_OTPPG0W2       0xF0E2
++#define FSM_OTPPG0W3       0xF0E3
++#define FSM_OTPPG1W0       0xF0E4
++#define FSM_OTPPG1W1       0xF0E5
++#define FSM_OTPPG1W2       0xF0E6
++#define FSM_OTPPG1W3       0xF0E7
++#define FSM_OTPPG2         0xF0E8
++
++#endif /* Generated at: 2019-09-20.16:09:45 */

@@ -1,0 +1,129 @@
+# Reference: <https://postmarketos.org/devicepkg>
+# Maintainer: limonabisi
+pkgname=device-samsung-gta4l
+pkgdesc="Samsung Galaxy Tab A7 10.4 2020"
+pkgver=2
+pkgrel=0
+url="https://github.com/limonabisi/pmaports-gta4l"
+license="MIT"
+arch="aarch64"
+options="!check !archcheck"
+depends="
+	bootmac
+	firmware-samsung-gta4l-adreno
+	firmware-samsung-gta4l-adsp
+	firmware-samsung-gta4l-cdsp
+	firmware-samsung-gta4l-ipa
+	firmware-samsung-gta4l-radio
+	firmware-samsung-gta4l-rproc
+	firmware-samsung-gta4l-touch
+	firmware-samsung-gta4l-venus
+	linux-firmware-qca
+	linux-postmarketos-qcom-sm6115
+	mkbootimg
+	postmarketos-base
+	"
+makedepends="devicepkg-dev"
+builddir="$srcdir"
+subpackages="
+	$pkgname-sensors
+	$pkgname-charger
+	"
+source="
+	deviceinfo
+	modules-initfs
+	80-gta4l.preset
+	80-gta4l-user.preset
+	90-gta4l-jack.rules
+	90-gta4l-scan.conf
+	90-gta4l-touch.rules
+	Samsung-Galaxy-Tab-A7.conf
+	gta4l-HiFi.conf
+	gta4l-battery-count.service
+	gta4l-charger-generator
+	gta4l-charger.c
+	gta4l-charger.service
+	gta4l-charger.target
+	gta4l-debug-report
+	gta4l-debug-report.service
+	gta4l-firmware-import
+	gta4l-firmware-import.service
+	gta4l-jack-yenile
+	gta4l-jack-yenile.service
+	gta4l-sensors-modules.conf
+	gta4l-ses-kontrol
+	gta4l-ses-kontrol.service
+	gta4l-usb-ag
+	gta4l-usb-ag.service
+	gta4l-venus.conf
+	hexagonrpcd-adsp-rootpd-gta4l.conf
+	hexagonrpcd-adsp-sensorspd-gta4l.conf
+	"
+
+build() {
+	devicepkg_build $startdir $pkgname
+	${CC:-gcc} $CFLAGS -O2 -Wall -o gta4l-charger gta4l-charger.c $LDFLAGS
+}
+
+package() {
+	devicepkg_package $startdir $pkgname
+
+	install -Dm644 "$srcdir"/80-gta4l.preset -t \
+		"$pkgdir"/usr/lib/systemd/system-preset/
+	install -Dm644 "$srcdir"/80-gta4l-user.preset \
+		"$pkgdir"/usr/lib/systemd/user-preset/80-gta4l.preset
+
+	# Boot-time setup: the tablet's own firmware, speaker tuning, zram, CPUs
+	for f in gta4l-firmware-import gta4l-debug-report gta4l-jack-yenile \
+		 gta4l-usb-ag gta4l-ses-kontrol; do
+		install -Dm755 "$srcdir"/$f -t "$pkgdir"/usr/libexec/
+	done
+	for f in gta4l-firmware-import gta4l-debug-report gta4l-battery-count \
+		 gta4l-jack-yenile gta4l-usb-ag; do
+		install -Dm644 "$srcdir"/$f.service -t "$pkgdir"/usr/lib/systemd/system/
+	done
+	install -Dm644 "$srcdir"/gta4l-ses-kontrol.service -t \
+		"$pkgdir"/usr/lib/systemd/user/
+
+	install -Dm644 "$srcdir"/90-gta4l-touch.rules -t "$pkgdir"/usr/lib/udev/rules.d/
+	install -Dm644 "$srcdir"/90-gta4l-jack.rules -t "$pkgdir"/usr/lib/udev/rules.d/
+
+	# Sound routing (ALSA UCM)
+	install -Dm644 "$srcdir"/gta4l-HiFi.conf \
+		"$pkgdir"/usr/share/alsa/ucm2/Samsung/gta4l/HiFi.conf
+	install -Dm644 "$srcdir"/Samsung-Galaxy-Tab-A7.conf -t \
+		"$pkgdir"/usr/share/alsa/ucm2/conf.d/sm4250/
+
+	install -Dm644 "$srcdir"/90-gta4l-scan.conf -t \
+		"$pkgdir"/usr/lib/NetworkManager/conf.d/
+	install -Dm644 "$srcdir"/gta4l-venus.conf -t "$pkgdir"/usr/lib/modprobe.d/
+}
+
+sensors() {
+	pkgdesc="Samsung Galaxy Tab A7 10.4 2020: sensors on the ADSP (accelerometer, light, compass)"
+	depends="hexagonrpcd hexagonrpcd-gta4l iio-sensor-proxy libssc"
+	install_if="$pkgname=$pkgver-r$pkgrel"
+
+	install -Dm644 "$srcdir"/gta4l-sensors-modules.conf \
+		"$subpkgdir"/usr/lib/modules-load.d/gta4l-sensors.conf
+	install -Dm644 "$srcdir"/hexagonrpcd-adsp-rootpd-gta4l.conf \
+		"$subpkgdir"/usr/lib/systemd/system/hexagonrpcd-adsp-rootpd.service.d/gta4l.conf
+	install -Dm644 "$srcdir"/hexagonrpcd-adsp-sensorspd-gta4l.conf \
+		"$subpkgdir"/usr/lib/systemd/system/hexagonrpcd-adsp-sensorspd.service.d/gta4l.conf
+}
+
+charger() {
+	pkgdesc="Samsung Galaxy Tab A7 10.4 2020: charging screen when a charger is plugged into the powered-off tablet"
+	install_if="$pkgname=$pkgver-r$pkgrel"
+
+	install -Dm755 "$builddir"/gta4l-charger -t "$subpkgdir"/usr/bin/
+	install -Dm755 "$srcdir"/gta4l-charger-generator -t \
+		"$subpkgdir"/usr/lib/systemd/system-generators/
+	install -Dm644 "$srcdir"/gta4l-charger.service -t \
+		"$subpkgdir"/usr/lib/systemd/system/
+	install -Dm644 "$srcdir"/gta4l-charger.target -t \
+		"$subpkgdir"/usr/lib/systemd/system/
+}
+
+# Generate with: pmbootstrap checksum device-samsung-gta4l
+sha512sums=""

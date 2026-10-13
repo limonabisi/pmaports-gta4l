@@ -1,0 +1,5 @@
+# WCD937x jack detection: the codec reports plug/unplug over the TX SoundWire
+# bus, which misses it while it sleeps; keep that bus awake. The RX bus is
+# left alone: held awake it loses its link to the codec once its clocks stop.
+SUBSYSTEM=="platform", KERNEL=="a740000.soundwire", ATTR{power/control}="on"
+SUBSYSTEM=="soundwire", KERNEL=="sdw:*:3", ATTR{power/control}="on"

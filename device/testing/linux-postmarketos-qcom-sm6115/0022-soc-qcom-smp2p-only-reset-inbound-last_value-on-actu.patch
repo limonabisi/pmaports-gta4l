@@ -1,0 +1,38 @@
+From dc00e32392900d53b7a844f71792dc0c0ae4e888 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 9 Oct 2026 21:42:58 +0300
+Subject: [PATCH 22/24] soc: qcom: smp2p: only reset inbound last_value on
+ actual SSR restart
+
+qcom_smp2p_check_ssr() cleared last_value of every inbound entry on each
+interrupt, so already-set ready/handover bits looked newly raised and the
+ADSP remoteproc logged "Handover signaled, but it already happened" once
+a second. Do the reset only when a restart is detected.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016AirPAcjr6JyfsKizshE8B
+---
+ drivers/soc/qcom/smp2p.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/soc/qcom/smp2p.c b/drivers/soc/qcom/smp2p.c
+index af0ceeaf6..d7360b276 100644
+--- a/drivers/soc/qcom/smp2p.c
++++ b/drivers/soc/qcom/smp2p.c
+@@ -194,10 +194,12 @@ static bool qcom_smp2p_check_ssr(struct qcom_smp2p *smp2p)
+ 
+ 	restart_done = in->flags & BIT(SMP2P_FLAGS_RESTART_DONE_BIT);
+ 	restart = restart_done != smp2p->ssr_ack;
+-	list_for_each_entry(entry, &smp2p->inbound, node) {
+-		if (!entry->value)
+-			continue;
+-		entry->last_value = 0;
++	if (restart) {
++		list_for_each_entry(entry, &smp2p->inbound, node) {
++			if (!entry->value)
++				continue;
++			entry->last_value = 0;
++		}
+ 	}
+ 
+ 	return restart;

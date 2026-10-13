@@ -1,0 +1,15 @@
+[Unit]
+Description=gta4l: keep the battery count (learned capacity and charge) across reboots
+After=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Capacity first, then the charge it is a part of. The charge is only taken
+# back if it was saved in the last 7 days; otherwise the driver starts from
+# the battery voltage.
+ExecStart=/bin/sh -c 'B=/sys/class/power_supply/qcom-qg-battery; D=/var/lib/battery; [ -s $D/charge_full ] && cat $D/charge_full > $B/charge_full; [ -s $D/charge_now ] && [ -n "$(find $D/charge_now -mtime -7)" ] && cat $D/charge_now > $B/charge_now; true'
+ExecStop=/bin/sh -c 'B=/sys/class/power_supply/qcom-qg-battery; D=/var/lib/battery; mkdir -p $D && cat $B/charge_full > $D/charge_full && cat $B/charge_now > $D/charge_now; sync'
+
+[Install]
+WantedBy=multi-user.target gta4l-charger.target
