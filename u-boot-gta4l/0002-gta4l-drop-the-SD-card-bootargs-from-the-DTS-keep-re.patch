@@ -1,0 +1,87 @@
+From 74fa21de6bfad5671540a39cd580fc9e93563448 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 06:28:34 +0300
+Subject: [PATCH 2/2] gta4l: drop the SD-card bootargs from the DTS, keep
+ repeated options
+
+ABL put the DTS's old stowaway bootargs (nr_cpus=1, pmos.root=/dev/mmcblk1p1)
+in front of the boot image's command line, and the pass-through dropped the
+second console= as a duplicate. Remove them and skip only options given in full.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016AirPAcjr6JyfsKizshE8B
+---
+ arch/arm/mach-snapdragon/board.c              | 23 ++++++++++---------
+ .../src/arm64/qcom/sm6115-samsung-gta4l.dts   |  5 +++-
+ 2 files changed, 16 insertions(+), 12 deletions(-)
+
+diff --git a/arch/arm/mach-snapdragon/board.c b/arch/arm/mach-snapdragon/board.c
+index cc2b472f..af168dad 100644
+--- a/arch/arm/mach-snapdragon/board.c
++++ b/arch/arm/mach-snapdragon/board.c
+@@ -226,19 +226,20 @@ static void qcom_save_prevbl_cmdline(void *fdt)
+ 	strlcpy(prevbl_cmdline, ba, sizeof(prevbl_cmdline));
+ }
+ 
+-/* Does the command line already carry an option with this name? */
+-static bool cmdline_has(const char *cmdline, const char *opt, size_t optlen)
++/* Does the command line already carry exactly this option? */
++static bool cmdline_has_word(const char *cmdline, const char *opt, size_t len)
+ {
+ 	const char *p = cmdline;
+ 
+ 	while (*p) {
++		size_t n;
++
+ 		while (*p == ' ')
+ 			p++;
+-		if (!*p)
+-			break;
+-		if (!strncmp(p, opt, optlen))
++		n = strcspn(p, " ");
++		if (n == len && !strncmp(p, opt, len))
+ 			return true;
+-		p += strcspn(p, " ");
++		p += n;
+ 	}
+ 
+ 	return false;
+@@ -266,17 +267,17 @@ const char *board_fdt_chosen_bootargs(const struct fdt_property *fdt_ba)
+ 	strlcpy(out, base ? base : "", sizeof(out));
+ 
+ 	for (p = prevbl_cmdline; *p; p += n) {
+-		const char *eq;
+-
+ 		while (*p == ' ')
+ 			p++;
+ 		n = strcspn(p, " ");
+ 		if (!n)
+ 			break;
+ 
+-		/* Compare up to and including '=' (whole word if there is none) */
+-		eq = memchr(p, '=', n);
+-		if (cmdline_has(out, p, eq ? (size_t)(eq - p + 1) : n))
++		/*
++		 * Skip only an option given in full already: some, like
++		 * console=, may appear more than once.
++		 */
++		if (cmdline_has_word(out, p, n))
+ 			continue;
+ 
+ 		if (strlen(out) + n + 2 > sizeof(out))
+diff --git a/dts/upstream/src/arm64/qcom/sm6115-samsung-gta4l.dts b/dts/upstream/src/arm64/qcom/sm6115-samsung-gta4l.dts
+index ee9416bb..13930e1b 100644
+--- a/dts/upstream/src/arm64/qcom/sm6115-samsung-gta4l.dts
++++ b/dts/upstream/src/arm64/qcom/sm6115-samsung-gta4l.dts
+@@ -58,7 +58,10 @@
+ 		#size-cells = <2>;
+ 		ranges;
+ 
+-		bootargs = "console=tty0 clk_ignore_unused pd_ignore_unused fbcon=rotate:1 nr_cpus=1 nokaslr loglevel=7 pmos.stowaway systemd.gpt_auto=0 pmos.root=/dev/mmcblk1p1 pmos_rootfsopts=defaults";
++		/*
++		 * No bootargs here: ABL would put them in front of the boot
++		 * image's command line, and U-Boot hands ABL's line to Linux.
++		 */
+ 
+ 		stdout-path = "framebuffer0";
+ 

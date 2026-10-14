@@ -24,16 +24,18 @@ command above.
 | `device-samsung-gta4l-sensors` | Accelerometer, light sensor and compass through the ADSP (hexagonrpcd + libssc + iio-sensor-proxy). |
 | `hexagonrpcd-gta4l` | hexagonrpcd with one patch: it also serves `sns_reg_version` next to the sensor registry. |
 | `firmware-samsung-gta4l` | Firmware packages. |
+| `u-boot-gta4l/` | U-Boot patches (charging in U-Boot, charge symbol, ABL command line pass-through) and `UBOOT-BOOTIMG.py` to build a U-Boot boot image. |
 
 ## Status
 
 Working: display, touch (NT36523 lide-hsd), Wi-Fi, Bluetooth, speakers,
 microphone, GPU (Adreno 610, Turnip), battery, offline charging, sleep
-(s2idle), accelerometer/light/compass.
+(s2idle), accelerometer/light/compass, H.264 hardware decoding (1080p at about
+50 fps with ffmpeg h264_v4l2m2m), U-Boot.
 
-Video decoding (Venus) decodes H.264 with Samsung's firmware 6.0.49 since the
-vcodec0 GDSC fix (patch 0026); it is still blacklisted in `gta4l-venus.conf`
-until it has been tried with real players. Not yet: headset not fully tested; the sensor configuration and registry are taken from the
+Venus is still blacklisted in `gta4l-venus.conf` until it has been tried with
+real players (ffmpeg crashes at the end of a stream). Known: the ADSP crashed
+once on resume from s2idle (audio and sensors lost until reboot). Not yet: headset not fully tested; the sensor configuration and registry are taken from the
 tablet's vendor/persist data and are not packaged here.
 
 Patches whose subject starts with `TEST` are still being tried on hardware.
