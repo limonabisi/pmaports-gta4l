@@ -3,7 +3,7 @@
 pkgname=device-samsung-gta4l
 pkgdesc="Samsung Galaxy Tab A7 10.4 2020"
 pkgver=2
-pkgrel=0
+pkgrel=1
 url="https://github.com/limonabisi/pmaports-gta4l"
 license="MIT"
 arch="aarch64"
@@ -51,6 +51,7 @@ source="
 	gta4l-jack-yenile
 	gta4l-jack-yenile.service
 	gta4l-sensors-modules.conf
+	gta4l-sensors-sleep.service
 	gta4l-ses-kontrol
 	gta4l-ses-kontrol.service
 	gta4l-usb-ag
@@ -110,6 +111,9 @@ sensors() {
 		"$subpkgdir"/usr/lib/systemd/system/hexagonrpcd-adsp-rootpd.service.d/gta4l.conf
 	install -Dm644 "$srcdir"/hexagonrpcd-adsp-sensorspd-gta4l.conf \
 		"$subpkgdir"/usr/lib/systemd/system/hexagonrpcd-adsp-sensorspd.service.d/gta4l.conf
+	# The ADSP crashes on resume while the sensor domain is in use
+	install -Dm644 "$srcdir"/gta4l-sensors-sleep.service -t \
+		"$subpkgdir"/usr/lib/systemd/system/
 }
 
 charger() {

@@ -34,8 +34,9 @@ microphone, GPU (Adreno 610, Turnip), battery, offline charging, sleep
 50 fps with ffmpeg h264_v4l2m2m), U-Boot.
 
 Venus is still blacklisted in `gta4l-venus.conf` until it has been tried with
-real players (ffmpeg crashes at the end of a stream). Known: the ADSP crashed
-once on resume from s2idle (audio and sensors lost until reboot). Not yet: headset not fully tested; the sensor configuration and registry are taken from the
+real players (ffmpeg crashes at the end of a stream). The ADSP crashes on resume from s2idle while the
+sensor domain is in use (audio and sensors lost until reboot);
+`gta4l-sensors-sleep.service` stops the sensor services around sleep. Not yet: headset not fully tested; the sensor configuration and registry are taken from the
 tablet's vendor/persist data and are not packaged here.
 
 Patches whose subject starts with `TEST` are still being tried on hardware.

@@ -1,0 +1,17 @@
+[Unit]
+Description=gta4l: stop the ADSP sensor services while sleeping
+# The ADSP crashes on resume (EX:kernel irq46) when the sensor process
+# domain is in use while the tablet sleeps, taking audio and the sensors
+# with it until reboot. Stop them before sleeping, start them on waking.
+Before=sleep.target
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/systemctl stop iio-sensor-proxy.service hexagonrpcd-adsp-sensorspd.service hexagonrpcd-adsp-rootpd.service
+ExecStart=/bin/sleep 1
+ExecStop=/usr/bin/systemctl --no-block start hexagonrpcd-adsp-rootpd.service hexagonrpcd-adsp-sensorspd.service iio-sensor-proxy.service
+
+[Install]
+WantedBy=sleep.target

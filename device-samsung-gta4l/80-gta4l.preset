@@ -12,3 +12,4 @@ enable gta4l-usb-ag.service
 enable hexagonrpcd-adsp-rootpd.service
 enable hexagonrpcd-adsp-sensorspd.service
 disable hexagonrpcd-sdsp.service
+enable gta4l-sensors-sleep.service
