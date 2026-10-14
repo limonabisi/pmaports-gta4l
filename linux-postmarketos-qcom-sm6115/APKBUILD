@@ -58,6 +58,7 @@ source="
 	0023-power-supply-qcom_qg-count-charge-in-and-out-instead.patch
 	0024-arm64-dts-qcom-gta4l-add-the-touch-nodes-and-msm-ids.patch
 	0025-drm-panel-samsung-gta4l-leave-the-display-off-when-t.patch
+	0026-clk-qcom-gcc-sm6115-let-Venus-switch-the-vcodec0-GDS.patch
 	"
 builddir="$srcdir/linux-$_commit"
 

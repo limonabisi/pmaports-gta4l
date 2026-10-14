@@ -31,9 +31,9 @@ Working: display, touch (NT36523 lide-hsd), Wi-Fi, Bluetooth, speakers,
 microphone, GPU (Adreno 610, Turnip), battery, offline charging, sleep
 (s2idle), accelerometer/light/compass.
 
-Not yet: video decoding (Venus probes with Samsung firmware 6.0.49 but no
-frames come out, so it is blacklisted in `gta4l-venus.conf`); headset not
-fully tested; the sensor configuration and registry are taken from the
+Video decoding (Venus) decodes H.264 with Samsung's firmware 6.0.49 since the
+vcodec0 GDSC fix (patch 0026); it is still blacklisted in `gta4l-venus.conf`
+until it has been tried with real players. Not yet: headset not fully tested; the sensor configuration and registry are taken from the
 tablet's vendor/persist data and are not packaged here.
 
 Patches whose subject starts with `TEST` are still being tried on hardware.
