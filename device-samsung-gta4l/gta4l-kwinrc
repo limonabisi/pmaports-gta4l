@@ -1,0 +1,3 @@
+[Wayland]
+# On-screen keyboard: the tablet has no keyboard of its own
+InputMethod[$e]=/usr/share/applications/org.kde.plasma.keyboard.desktop

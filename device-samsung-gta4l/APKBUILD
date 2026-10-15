@@ -3,7 +3,7 @@
 pkgname=device-samsung-gta4l
 pkgdesc="Samsung Galaxy Tab A7 10.4 2020"
 pkgver=2
-pkgrel=9
+pkgrel=10
 url="https://github.com/limonabisi/pmaports-gta4l"
 license="MIT"
 arch="aarch64"
@@ -53,6 +53,7 @@ source="
 	gta4l-firmware-import.service
 	gta4l-jack-yenile
 	gta4l-jack-yenile.service
+	gta4l-kwinrc
 	gta4l-pam-systemd-user
 	gta4l-sensors-modules.conf
 	gta4l-sensors-sleep.service
@@ -104,6 +105,9 @@ package() {
 
 	install -Dm644 "$srcdir"/90-gta4l-scan.conf -t \
 		"$pkgdir"/usr/lib/NetworkManager/conf.d/
+
+	# Plasma's on-screen keyboard
+	install -Dm644 "$srcdir"/gta4l-kwinrc "$pkgdir"/etc/xdg/kwinrc
 }
 
 sensors() {
@@ -158,6 +162,7 @@ a4f42d40e2100a3b7aaa20f6ea135e69dd5d7d9b4450be20984f4802cda59c14f0cfd11f004ca7b9
 502c6642a9d4f9a2e6904686a81347f1c20574757b82fb2c78e612c86af47a666957770606eec597a57341a5827c719906740802f4def98e715a709fb6684f0b  gta4l-firmware-import.service
 f77b1d982fabf3015f3a55f4dfb572e08e8cf506dfd8612bd5c4baa80bad7876bd066e8987f5ab52485e0d7870b7754f7d83909750e29edd8d7ee15b8de35540  gta4l-jack-yenile
 9c46c89567df6e799eb0db5e20cca8ef9405ecbb4965e06a1beeff9eeeceb4f2028dd5b0e5a29ee6a66e86a914666da61f77536853df1ecfcc8c4576edb79de4  gta4l-jack-yenile.service
+922382c51e170e8cf4d485777058fb8403a7643274453279b55a1866ea6f425a55ca712bc83dc6942e8ecb4fae46f79ffe8b62fe630bf802339ec767f1ee6ab8  gta4l-kwinrc
 cf4117d8e2202fa5229ad5ba3410a0fdd7e70840718f3589ea9eadb17a59ca108d58675d2f06abd22bcd265329e21de3c5c2ae3db15bdb5f00eeb48089021e35  gta4l-pam-systemd-user
 35f86245371787392c8658b6bdd02104c0bf52a994e75b6f657d7a74f4e91392e147a803882ce1c5a33fae1638915592b45dc0aa82d3015f4da9b4fb96817a3d  gta4l-sensors-modules.conf
 66d105090aa588fe49fe9c5e1d5fe7620208d89624897d396b5e3dc1da811e8ba9260823384961af1f61b69f93097109c3bc0b2a9bd4ace294fb7292d4d49f94  gta4l-sensors-sleep.service
