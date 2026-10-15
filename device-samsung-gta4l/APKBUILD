@@ -3,7 +3,7 @@
 pkgname=device-samsung-gta4l
 pkgdesc="Samsung Galaxy Tab A7 10.4 2020"
 pkgver=2
-pkgrel=6
+pkgrel=7
 url="https://github.com/limonabisi/pmaports-gta4l"
 license="MIT"
 arch="aarch64"
@@ -22,6 +22,7 @@ depends="
 	linux-postmarketos-qcom-sm6115
 	mesa-vulkan-freedreno
 	mkbootimg
+	mtools
 	postmarketos-base
 	"
 makedepends="devicepkg-dev"
@@ -52,6 +53,7 @@ source="
 	gta4l-firmware-import.service
 	gta4l-jack-yenile
 	gta4l-jack-yenile.service
+	gta4l-pam-systemd-user
 	gta4l-sensors-modules.conf
 	gta4l-sensors-sleep.service
 	gta4l-ses-kontrol
@@ -85,6 +87,10 @@ package() {
 	done
 	install -Dm644 "$srcdir"/gta4l-ses-kontrol.service -t \
 		"$pkgdir"/usr/lib/systemd/user/
+
+	# Alpine's PAM has no pam_selinux, which systemd's stack requires
+	install -Dm644 "$srcdir"/gta4l-pam-systemd-user \
+		"$pkgdir"/etc/pam.d/systemd-user
 
 	install -Dm644 "$srcdir"/90-gta4l-touch.rules -t "$pkgdir"/usr/lib/udev/rules.d/
 	install -Dm644 "$srcdir"/90-gta4l-jack.rules -t "$pkgdir"/usr/lib/udev/rules.d/

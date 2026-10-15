@@ -1,11 +1,14 @@
 #!/bin/sh
 # Copies the Samsung-signed firmware that belongs to THIS tablet from its own
-# firmware partition (read-only) to /lib/firmware/updates, which the kernel
-# searches before the packaged copies, and the speaker amplifiers' tuning file
-# from the vendor partition inside "super". Each is done once; nothing is
-# written to the eMMC partitions.
-DST=/lib/firmware/updates/qcom/sm6115/Samsung/gta4l
+# firmware partitions to /lib/firmware/updates, which the kernel searches
+# before the packaged copies, and the speaker amplifiers' tuning file from the
+# vendor partition inside "super". Each is done once; nothing is written to
+# the eMMC partitions. The firmware partitions (apnhlos, modem) are FAT and
+# are read with mtools, without mounting them.
+# GTA4L_FW_DST=<dir> copies the firmware there only, for testing.
+DST=${GTA4L_FW_DST:-/lib/firmware/updates/qcom/sm6115/Samsung/gta4l}
 LOG=/var/log/gta4l-firmware-import.log
+export MTOOLS_SKIP_CHECK=1
 say() { echo "gta4l-fw: $*" | tee -a "$LOG" > /dev/kmsg 2>/dev/null || true; }
 
 le32() {
@@ -51,14 +54,14 @@ vendorfw() {
 	fi
 	losetup -d "$L"
 }
-vendorfw
+[ -n "$GTA4L_FW_DST" ] || vendorfw
 
 [ -e "$DST/.imported" ] && exit 0
 
 say "partitions: $(grep -h PARTNAME= /sys/class/block/*/uevent | cut -d= -f2 | tr '\n' ' ')"
 
-mnt=/run/gta4l-fw
-mkdir -p "$mnt" "$DST"
+command -v mcopy >/dev/null || { say "mtools missing, cannot read the firmware"; exit 1; }
+mkdir -p "$DST"
 n=0
 for name in apnhlos modem; do
 	part=""
@@ -69,24 +72,21 @@ for name in apnhlos modem; do
 		fi
 	done
 	[ -n "$part" ] || { say "$name: no such partition"; continue; }
-	if ! mount -o ro "$part" "$mnt" 2>/dev/null; then
-		say "$name: cannot mount $part ($(blkid "$part" 2>/dev/null))"
-		continue
-	fi
-	src="$mnt/image"
-	[ -d "$src" ] || src="$mnt"
-	say "$name ($part): $(ls "$src" | grep -v '\.b[0-9][0-9]$' | tr '\n' ' ')"
+	src=::/image
+	mdir -i "$part" -b $src >/dev/null 2>&1 || src=::
+	files=$(mdir -i "$part" -b $src 2>/dev/null | sed 's|.*/||')
+	[ -n "$files" ] || { say "$name: cannot read $part ($(blkid "$part" 2>/dev/null))"; continue; }
+	say "$name ($part): $(echo "$files" | grep -v '\.b[0-9][0-9]$' | tr '\n' ' ')"
 	for pat in adsp cdsp modem mba a610_zap venus wlanmdsp ipa_fws bdwlan; do
-		for f in "$src"/$pat*; do
-			[ -f "$f" ] || continue
-			cp "$f" "$DST/" && n=$((n + 1))
+		for f in $(echo "$files" | grep -i "^$pat"); do
+			mcopy -n -o -i "$part" "$src/$f" "$DST/$(echo "$f" | tr A-Z a-z)" &&
+				n=$((n + 1))
 		done
 		# Split images (.mdt + .bNN): the kernel is told to load NAME.mbn
 		if [ -f "$DST/$pat.mdt" ] && [ ! -f "$DST/$pat.mbn" ]; then
 			cp "$DST/$pat.mdt" "$DST/$pat.mbn"
 		fi
 	done
-	umount "$mnt"
 done
 say "copied $n files to $DST"
-touch "$DST/.imported"
+[ -n "$GTA4L_FW_DST" ] || touch "$DST/.imported"
