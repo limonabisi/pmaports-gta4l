@@ -3,7 +3,7 @@
 pkgname=device-samsung-gta4l
 pkgdesc="Samsung Galaxy Tab A7 10.4 2020"
 pkgver=2
-pkgrel=8
+pkgrel=9
 url="https://github.com/limonabisi/pmaports-gta4l"
 license="MIT"
 arch="aarch64"
@@ -164,5 +164,5 @@ cf4117d8e2202fa5229ad5ba3410a0fdd7e70840718f3589ea9eadb17a59ca108d58675d2f06abd2
 4463bfe125d3eacc949a61d2517fd0fa7963328e802666764c46be8e7abc931e9bfe94c65b48e402465b0f78fb5d5333b37a9681d1392713a9bdea14f20aab0c  gta4l-ses-kontrol
 6da38fec1c7fc854d3787674a51073cbe80f3ba5d7d188819e66aa8ba74b1db1c144b1f8d8e0299ca1261715a0184be2ed1c7fec1ef0ef08ea97d41a7ed694da  gta4l-ses-kontrol.service
 30a1718a67dddd30b35298a905ba5729b80c3ed459ccc0eb697f9f26090e2d22e910a5221a5bb2c2f3bef1f0ebba4a930d5f5d99888b3ba1cf48ea34b859ab6e  hexagonrpcd-adsp-rootpd-gta4l.conf
-126b9c975cc9da81a6ca2c8563f8e819899f041506a27d7a3a906784637de7116d40a61544b837afaeaa51a68d89bb64e13f8d09dffd52614664bb24678adeed  hexagonrpcd-adsp-sensorspd-gta4l.conf
+ff87b9bada77086b253bd15e617a0fe5ca3761e3d699433b1c724663f6f687c7221bdc4258094ecdafbe76ae3fcca9ff3ec97dd42ac1de38cc294d6c400cc914  hexagonrpcd-adsp-sensorspd-gta4l.conf
 "
