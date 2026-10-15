@@ -1,4 +1,4 @@
-# Maintainer: limonabisi
+# Maintainer: limonabisi <herkesanlamaz46@gmail.com>
 # Kernel for the Samsung Galaxy Tab A7 10.4 2020 (gta4l), SM6115.
 # Source: limonabisi/linux-gta4l, branch gta4l-7.2-clean (LinuxForGta4l
 # gta4l-7.2 plus the gta4l work as one commit per driver and one for the DTS).

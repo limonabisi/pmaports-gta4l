@@ -1,4 +1,4 @@
-# Maintainer: limonabisi
+# Maintainer: limonabisi <herkesanlamaz46@gmail.com>
 # hexagonrpcd with one change gta4l's sensor firmware needs: it also asks for
 # sns_reg_version next to the sensor registry. Installed under its own name so
 # it does not replace the distribution's hexagonrpcd.
