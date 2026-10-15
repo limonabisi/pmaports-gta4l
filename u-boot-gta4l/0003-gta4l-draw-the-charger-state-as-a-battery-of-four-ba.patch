@@ -1,16 +1,18 @@
-From 87770fbf148721ac38f1f98ff51b927473bb88a0 Mon Sep 17 00:00:00 2001
+From cfd6a2c393a20483571e06c820b5932b105c4301 Mon Sep 17 00:00:00 2001
 From: limonabisi <herkesanlamaz46@gmail.com>
 Date: Thu, 15 Oct 2026 09:58:18 +0300
 Subject: [PATCH] gta4l: draw the charger state as a battery of four bars
 
 A bolt and three bars while charging, four bars when full, "!" and one
-bar when charging stopped.
+bar when charging stopped. The pixels go straight into the frame
+buffer, so report the area as damaged: with CONFIG_VIDEO_DAMAGE only
+damaged areas are flushed to the display, and the symbol never showed.
 ---
- arch/arm/mach-snapdragon/pmi632_charge.c | 83 ++++++++++++++++--------
- 1 file changed, 56 insertions(+), 27 deletions(-)
+ arch/arm/mach-snapdragon/pmi632_charge.c | 114 +++++++++++++++++------
+ 1 file changed, 86 insertions(+), 28 deletions(-)
 
 diff --git a/arch/arm/mach-snapdragon/pmi632_charge.c b/arch/arm/mach-snapdragon/pmi632_charge.c
-index a00674ea..a9f6f6c3 100644
+index a00674ea..c4e8fe32 100644
 --- a/arch/arm/mach-snapdragon/pmi632_charge.c
 +++ b/arch/arm/mach-snapdragon/pmi632_charge.c
 @@ -9,8 +9,9 @@
@@ -58,10 +60,34 @@ index a00674ea..a9f6f6c3 100644
  
  /* 10x16 lightning bolt, drawn at twice the size */
  static const char *const bolt[] = {
-@@ -240,12 +253,27 @@ static void fill(struct video_priv *vp, int x0, int y0, int w, int h, u32 col)
+@@ -240,12 +253,51 @@ static void fill(struct video_priv *vp, int x0, int y0, int w, int h, u32 col)
  			put_px(vp, x, y, col);
  }
  
++/*
++ * The pixels are written straight into the frame buffer, so tell the video
++ * uclass which part changed; with CONFIG_VIDEO_DAMAGE only damaged areas are
++ * flushed from the cache to the display.
++ */
++static void damage(struct udevice *vdev, struct video_priv *vp, int lx, int ly,
++		   int w, int h)
++{
++	switch (vp->rot) {
++	case 1:
++		video_damage(vdev, vp->xsize - (ly + h), lx, h, w);
++		break;
++	case 2:
++		video_damage(vdev, vp->xsize - (lx + w), vp->ysize - (ly + h), w, h);
++		break;
++	case 3:
++		video_damage(vdev, ly, vp->ysize - (lx + w), h, w);
++		break;
++	default:
++		video_damage(vdev, lx, ly, w, h);
++		break;
++	}
++}
++
 +static void glyph(struct video_priv *vp, const char *const *g, int w, int h,
 +		  int x0, int y0, u32 col)
 +{
@@ -87,7 +113,7 @@ index a00674ea..a9f6f6c3 100644
  	u32 col;
  
  	if (uclass_first_device_err(UCLASS_VIDEO, &vdev))
-@@ -254,12 +282,14 @@ static void chg_draw(enum chg_state st)
+@@ -254,12 +306,17 @@ static void chg_draw(enum chg_state st)
  
  	/* The menu clears the screen now and then, so redraw every time */
  	lw = (vp->rot & 1) ? vp->ysize : vp->xsize;
@@ -97,14 +123,18 @@ index a00674ea..a9f6f6c3 100644
 +	bx = x0 + SIGN_W + SIGN_GAP;
  
  	if (st == CHG_NONE) {
- 		if (last != CHG_NONE)
+-		if (last != CHG_NONE)
 -			fill(vp, x0, y0, ICON_W + NUB_W, ICON_H, COL_BLACK);
++		if (last != CHG_NONE) {
 +			fill(vp, x0, y0, SIGN_W + SIGN_GAP + ICON_W + NUB_W,
 +			     ICON_H, COL_BLACK);
++			damage(vdev, vp, x0, y0, SIGN_W + SIGN_GAP + ICON_W + NUB_W,
++			       ICON_H);
++		}
  		last = st;
  		video_sync(vdev, false);
  		return;
-@@ -268,26 +298,25 @@ static void chg_draw(enum chg_state st)
+@@ -268,26 +325,27 @@ static void chg_draw(enum chg_state st)
  
  	col = st == CHG_STOPPED ? COL_YELLOW : COL_GREEN;
  
@@ -146,6 +176,8 @@ index a00674ea..a9f6f6c3 100644
 +	for (i = 0; i < BARS; i++)
 +		fill(vp, bx + 2 * ICON_LINE + i * BAR_STEP, y0 + 6, BAR_W,
 +		     ICON_H - 12, i < lit ? col : COL_DIM);
++
++	damage(vdev, vp, x0, y0, SIGN_W + SIGN_GAP + ICON_W + NUB_W, ICON_H);
  
  	video_sync(vdev, false);
  }
