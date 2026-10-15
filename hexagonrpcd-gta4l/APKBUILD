@@ -4,7 +4,7 @@
 # it does not replace the distribution's hexagonrpcd.
 pkgname=hexagonrpcd-gta4l
 pkgver=0.4.0_git20260915
-pkgrel=0
+pkgrel=1
 _commit="da7a3742ab8d5273a281b70ee11f16fb2cb6a690"
 pkgdesc="hexagonrpcd patched for the Samsung Galaxy Tab A7 10.4 2020 sensors"
 url="https://github.com/linux-msm/hexagonrpc"
@@ -17,6 +17,14 @@ source="
 	0001-rpcd-serve-sns_reg_version-next-to-the-sensor-registry.patch
 	"
 builddir="$srcdir/hexagonrpc-$_commit"
+
+prepare() {
+	default_prepare
+	# Link libhexagonrpc into the daemon: only the daemon is packaged, under
+	# its own name, so it must not need the library from another package.
+	sed -i -e 's/^libhexagonrpc = shared_library(/libhexagonrpc = static_library(/' \
+		-e '/soversion : api_version,/d' libhexagonrpc/meson.build
+}
 
 build() {
 	abuild-meson . output

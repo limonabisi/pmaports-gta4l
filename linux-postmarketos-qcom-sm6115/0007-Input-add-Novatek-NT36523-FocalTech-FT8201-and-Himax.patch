@@ -1,0 +1,3760 @@
+From 1c3f618e810ad893e6e5527e0cb8f1349d9be09c Mon Sep 17 00:00:00 2001
+From: limonabisi <herkesanlamaz46@gmail.com>
+Date: Thu, 15 Oct 2026 08:41:55 +0300
+Subject: [PATCH 07/10] Input: add Novatek NT36523, FocalTech FT8201 and Himax
+ HX83102E SPI touchscreen drivers
+
+Touch parts of the TDDI panels found in the Galaxy Tab A7 (gta4l). They
+load the controller firmware of the fitted panel and follow the DRM
+panel's power state.
+---
+ drivers/input/touchscreen/Kconfig             |   49 +
+ drivers/input/touchscreen/Makefile            |    3 +
+ .../input/touchscreen/focaltech-ft8201-spi.c  |  978 +++++++++++
+ .../input/touchscreen/himax-hx83102e-spi.c    | 1442 +++++++++++++++++
+ .../input/touchscreen/novatek-nt36523-spi.c   | 1228 ++++++++++++++
+ 5 files changed, 3700 insertions(+)
+ create mode 100644 drivers/input/touchscreen/focaltech-ft8201-spi.c
+ create mode 100644 drivers/input/touchscreen/himax-hx83102e-spi.c
+ create mode 100644 drivers/input/touchscreen/novatek-nt36523-spi.c
+
+diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
+index 9b9ae8ac3..56db79989 100644
+--- a/drivers/input/touchscreen/Kconfig
++++ b/drivers/input/touchscreen/Kconfig
+@@ -701,6 +701,55 @@ config TOUCHSCREEN_NOVATEK_NVT_TS
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called novatek-nvt-ts.
+ 
++config TOUCHSCREEN_NOVATEK_NT36523_SPI
++	tristate "Novatek NT36523 SPI touchscreen support"
++	depends on SPI_MASTER
++	depends on DRM || !DRM
++	select FW_LOADER
++	help
++	  Say Y here if you have a Novatek NT36523 touch and display
++	  driver integration (TDDI) panel whose touch part is connected
++	  over SPI, as found in the Samsung Galaxy Tab A7 10.4 (2020).
++
++	  The controller needs a firmware image that the driver loads
++	  each time the panel is powered on.
++
++	  If unsure, say N.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called novatek-nt36523-spi.
++
++config TOUCHSCREEN_FOCALTECH_FT8201_SPI
++	tristate "FocalTech FT8201 SPI touchscreen support"
++	depends on SPI_MASTER
++	depends on DRM || !DRM
++	select CRC_CCITT
++	select FW_LOADER
++	help
++	  Say Y here if you have a FocalTech FT8201 touch and display
++	  driver integration (TDDI) panel whose touch part is connected
++	  over SPI, as found in some Samsung Galaxy Tab A7 10.4 (2020).
++
++	  If unsure, say N.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called focaltech-ft8201-spi.
++
++config TOUCHSCREEN_HIMAX_HX83102E_SPI
++	tristate "Himax HX83102E SPI touchscreen support"
++	depends on SPI_MASTER
++	depends on DRM || !DRM
++	select FW_LOADER
++	help
++	  Say Y here if you have a Himax HX83102E touch and display
++	  driver integration (TDDI) panel whose touch part is connected
++	  over SPI, as found in some Samsung Galaxy Tab A7 10.4 (2020).
++
++	  If unsure, say N.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called himax-hx83102e-spi.
++
+ config TOUCHSCREEN_IMAGIS
+ 	tristate "Imagis touchscreen support"
+ 	depends on I2C
+diff --git a/drivers/input/touchscreen/Makefile b/drivers/input/touchscreen/Makefile
+index bfd9de833..058393807 100644
+--- a/drivers/input/touchscreen/Makefile
++++ b/drivers/input/touchscreen/Makefile
+@@ -69,6 +69,9 @@ obj-$(CONFIG_TOUCHSCREEN_MMS114)	+= mms114.o
+ obj-$(CONFIG_TOUCHSCREEN_MSG2638)	+= msg2638.o
+ obj-$(CONFIG_TOUCHSCREEN_MTOUCH)	+= mtouch.o
+ obj-$(CONFIG_TOUCHSCREEN_NOVATEK_NVT_TS)	+= novatek-nvt-ts.o
++obj-$(CONFIG_TOUCHSCREEN_NOVATEK_NT36523_SPI)	+= novatek-nt36523-spi.o
++obj-$(CONFIG_TOUCHSCREEN_FOCALTECH_FT8201_SPI)	+= focaltech-ft8201-spi.o
++obj-$(CONFIG_TOUCHSCREEN_HIMAX_HX83102E_SPI)	+= himax-hx83102e-spi.o
+ obj-$(CONFIG_TOUCHSCREEN_HP600)		+= hp680_ts_input.o
+ obj-$(CONFIG_TOUCHSCREEN_HP7XX)		+= jornada720_ts.o
+ obj-$(CONFIG_TOUCHSCREEN_IPAQ_MICRO)	+= ipaq-micro-ts.o
+diff --git a/drivers/input/touchscreen/focaltech-ft8201-spi.c b/drivers/input/touchscreen/focaltech-ft8201-spi.c
+new file mode 100644
+index 000000000..92ee1ded2
+--- /dev/null
++++ b/drivers/input/touchscreen/focaltech-ft8201-spi.c
+@@ -0,0 +1,978 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * FocalTech FT8201 SPI touchscreen driver (TDDI, host firmware download)
++ *
++ * The touch controller shares its silicon with the display driver and has
++ * no flash of its own: the host has to load the touch firmware into the
++ * controller's program RAM over SPI every time the panel has been reset.
++ *
++ * Protocol and register layout taken from the downstream "focaltech_touch"
++ * driver, Copyright (c) 2012-2020, FocalTech Systems, Ltd.
++ */
++
++#include <linux/crc-ccitt.h>
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/firmware.h>
++#include <linux/gpio/consumer.h>
++#include <linux/input.h>
++#include <linux/input/mt.h>
++#include <linux/input/touchscreen.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/pm.h>
++#include <linux/slab.h>
++#include <linux/spi/spi.h>
++#include <linux/string.h>
++#include <linux/unaligned.h>
++#include <linux/workqueue.h>
++
++#include <drm/drm_panel.h>
++
++/*
++ * Every SPI frame starts with a four byte header: command, control, and the
++ * big endian payload length. Payloads follow three dummy bytes. Reads ask for
++ * a CRC16 after the payload. The controller reports its status in the fourth
++ * received byte.
++ */
++#define FTS_SPI_HDR_LEN			4
++#define FTS_SPI_DUMMY_BYTES		3
++#define FTS_SPI_CRC_LEN			2
++#define FTS_SPI_CTRL_WRITE		0x00
++#define FTS_SPI_CTRL_READ		0xa0	/* read | data CRC enable */
++#define FTS_SPI_STATUS_ERR		0xa0
++#define FTS_SPI_RETRIES			3
++#define FTS_SPI_CS_HIGH_US		150
++#define FTS_SPI_MAX_HZ			6000000
++
++/* Largest payload of a single program RAM write, as used by the vendor */
++#define FTS_PACKET_LEN			(32 * 1024 - 16)
++#define FTS_READ_MAX_LEN		128
++#define FTS_XFER_BUF_LEN		(FTS_SPI_HDR_LEN + FTS_SPI_DUMMY_BYTES + \
++					 FTS_PACKET_LEN + FTS_SPI_CRC_LEN)
++
++/* ROM boot loader commands */
++#define FTS_CMD_START_APP		0x08
++#define FTS_CMD_START1			0x55
++#define FTS_CMD_READ_ID			0x90
++#define FTS_CMD_SET_PRAM_ADDR		0xad
++#define FTS_CMD_WRITE_PRAM		0xae
++#define FTS_CMD_ECC			0xcc
++#define FTS_CMD_ECC_READ		0xcd
++#define FTS_CMD_ECC_FINISH		0xce
++#define FTS_ECC_FINISH_OK		0xa5
++#define FTS_ECC_FINISH_TRIES		100
++#define FTS_ECC_POLY			0x8408
++#define FTS_ECC_LEN_MAX			(128 * 1024)
++
++/* Firmware registers */
++#define FTS_REG_POINT_DATA		0x01
++#define FTS_REG_CHIP_ID			0xa3
++#define FTS_REG_POWER_MODE		0xa5
++#define FTS_POWER_MODE_SLEEP		0x03
++#define FTS_REG_FW_VER			0xa6
++#define FTS_REG_BOOT_STATE		0xd0
++#define FTS_BOOT_STATE_ROM		0x01
++
++/* FT8201AB: ID of the ROM boot loader and of the running firmware */
++#define FTS_ROM_ID_H			0x82
++#define FTS_ROM_ID_L			0x01
++#define FTS_CHIP_ID_H			0x82
++
++/* Firmware image: application length (in 16 bit words) at 0x100 */
++#define FTS_APP_INFO_OFF		0x100
++#define FTS_FW_MIN_LEN			0x120
++#define FTS_APP_MAX_LEN			(96 * 1024)
++
++#define FTS_BOOT_LOOPS			30
++#define FTS_BOOT_ID_TRIES		3
++#define FTS_BOOT_DELAY_US		8000
++#define FTS_DOWNLOAD_TRIES		3
++#define FTS_VALID_TRIES			5
++#define FTS_VALID_INTERVAL_MS		200
++
++/* Touch report, read from FTS_REG_POINT_DATA */
++#define FTS_MAX_FINGERS			10
++#define FTS_MAX_ID			0x0a
++#define FTS_FINGER_LEN			6
++#define FTS_GESTURE_DATA_LEN		28
++#define FTS_POINT_DATA_LEN		(2 + FTS_MAX_FINGERS * FTS_FINGER_LEN + \
++					 FTS_GESTURE_DATA_LEN)
++#define FTS_EVENT_DOWN			0
++#define FTS_EVENT_CONTACT		2
++#define FTS_DEFAULT_PRESSURE		0x3f
++#define FTS_DEFAULT_AREA		0x09
++#define FTS_RECOVERY_PATTERN		0xef
++
++#define FTS_MAX_X			1200
++#define FTS_MAX_Y			2000
++
++#define FTS_FW_LOAD_TRIES		20
++#define FTS_FW_RETRY_MS			3000
++#define FTS_FW_PANEL_DELAY_MS		100
++
++static char *panel;
++module_param(panel, charp, 0444);
++MODULE_PARM_DESC(panel,
++		 "Panel to assume instead of the one named on the kernel command line, e.g. ft8201ab_lide_hsd_video");
++
++struct fts_ts {
++	struct spi_device *spi;
++	struct input_dev *input;
++	struct touchscreen_properties prop;
++	struct gpio_desc *reset_gpio;
++
++	/* Serialises all SPI traffic and the firmware state below */
++	struct mutex lock;
++	u8 *tx_buf;
++	u8 *rx_buf;
++
++	struct drm_panel_follower follower;
++	bool is_follower;
++	struct delayed_work fw_work;
++
++	const char *fw_name;
++	const struct firmware *fw;
++	u32 app_len;
++	unsigned int fw_tries;
++
++	/* The panel is up and the controller is supposed to be working */
++	bool enabled;
++	/* Firmware is loaded and the interrupt is enabled */
++	bool running;
++};
++
++/* ---------------------------------------------------------------------- */
++/* SPI access                                                             */
++/* ---------------------------------------------------------------------- */
++
++static int fts_spi_xfer(struct fts_ts *ts, size_t len)
++{
++	struct spi_transfer xfer = {
++		.tx_buf = ts->tx_buf,
++		.rx_buf = ts->rx_buf,
++		.len = len,
++		.speed_hz = FTS_SPI_MAX_HZ,
++	};
++	int ret;
++
++	ret = spi_sync_transfer(ts->spi, &xfer, 1);
++
++	/* Chip select has to stay high for a while between frames */
++	fsleep(FTS_SPI_CS_HIGH_US);
++
++	return ret;
++}
++
++static void fts_spi_header(struct fts_ts *ts, u8 cmd, u8 ctrl, size_t len)
++{
++	ts->tx_buf[0] = cmd;
++	ts->tx_buf[1] = ctrl;
++	put_unaligned_be16(len, &ts->tx_buf[2]);
++}
++
++static int fts_write(struct fts_ts *ts, u8 cmd, const u8 *data, size_t len)
++{
++	size_t xfer_len = FTS_SPI_HDR_LEN;
++	int i, ret = -EIO;
++
++	if (len > FTS_PACKET_LEN)
++		return -EINVAL;
++
++	fts_spi_header(ts, cmd, FTS_SPI_CTRL_WRITE, len);
++	if (len) {
++		/* The dummy bytes are only sent when there is a payload */
++		memset(&ts->tx_buf[FTS_SPI_HDR_LEN], 0, FTS_SPI_DUMMY_BYTES);
++		xfer_len += FTS_SPI_DUMMY_BYTES;
++		memcpy(&ts->tx_buf[xfer_len], data, len);
++		xfer_len += len;
++	}
++
++	for (i = 0; i < FTS_SPI_RETRIES; i++) {
++		ret = fts_spi_xfer(ts, xfer_len);
++		if (!ret && !(ts->rx_buf[3] & FTS_SPI_STATUS_ERR))
++			return 0;
++
++		ret = -EIO;
++		fsleep(FTS_SPI_CS_HIGH_US);
++	}
++
++	return ret;
++}
++
++static int fts_write_u8(struct fts_ts *ts, u8 cmd, u8 val)
++{
++	return fts_write(ts, cmd, &val, 1);
++}
++
++/*
++ * Returns -EBADMSG when the data was received but failed its CRC check; the
++ * (unverified) data is still copied in that case, as the controller signals
++ * a reset that way.
++ */
++static int fts_read(struct fts_ts *ts, u8 cmd, u8 *data, size_t len)
++{
++	const size_t pos = FTS_SPI_HDR_LEN + FTS_SPI_DUMMY_BYTES;
++	const size_t xfer_len = pos + len + FTS_SPI_CRC_LEN;
++	int i, ret = -EIO;
++
++	if (!len || len > FTS_READ_MAX_LEN)
++		return -EINVAL;
++
++	memset(ts->tx_buf, 0, xfer_len);
++	fts_spi_header(ts, cmd, FTS_SPI_CTRL_READ, len);
++
++	for (i = 0; i < FTS_SPI_RETRIES; i++) {
++		ret = fts_spi_xfer(ts, xfer_len);
++		if (ret || (ts->rx_buf[3] & FTS_SPI_STATUS_ERR)) {
++			ret = -EIO;
++			fsleep(FTS_SPI_CS_HIGH_US);
++			continue;
++		}
++
++		memcpy(data, &ts->rx_buf[pos], len);
++		if (crc_ccitt(0xffff, &ts->rx_buf[pos], len) ==
++		    get_unaligned_le16(&ts->rx_buf[pos + len]))
++			return 0;
++
++		ret = -EBADMSG;
++		fsleep(FTS_SPI_CS_HIGH_US);
++	}
++
++	return ret;
++}
++
++static int fts_read_u8(struct fts_ts *ts, u8 cmd, u8 *val)
++{
++	return fts_read(ts, cmd, val, 1);
++}
++
++/* ---------------------------------------------------------------------- */
++/* ROM boot loader                                                        */
++/* ---------------------------------------------------------------------- */
++
++static void fts_hw_reset(struct fts_ts *ts)
++{
++	if (!ts->reset_gpio)
++		return;
++
++	gpiod_set_value_cansleep(ts->reset_gpio, 1);
++	usleep_range(1000, 2000);
++	gpiod_set_value_cansleep(ts->reset_gpio, 0);
++}
++
++static int fts_check_boot_id(struct fts_ts *ts, u8 *id)
++{
++	int ret;
++
++	ret = fts_read(ts, FTS_CMD_READ_ID, id, 2);
++	if (ret)
++		return ret;
++
++	return id[0] == FTS_ROM_ID_H && id[1] == FTS_ROM_ID_L ? 0 : -ENODEV;
++}
++
++/* Reset the controller and wait until its ROM boot loader answers */
++static int fts_enter_boot(struct fts_ts *ts)
++{
++	u8 id[2] = { };
++	int i, j, ret = -EIO;
++
++	for (i = 0; i < FTS_BOOT_LOOPS; i++) {
++		fts_hw_reset(ts);
++		usleep_range(FTS_BOOT_DELAY_US, FTS_BOOT_DELAY_US + 1000);
++
++		for (j = 0; j < FTS_BOOT_ID_TRIES; j++) {
++			ret = fts_write(ts, FTS_CMD_START1, NULL, 0);
++			if (ret)
++				continue;
++
++			usleep_range(FTS_BOOT_DELAY_US, FTS_BOOT_DELAY_US + 1000);
++			ret = fts_check_boot_id(ts, id);
++			if (!ret)
++				return 0;
++		}
++	}
++
++	dev_err(&ts->spi->dev, "boot loader did not answer: %d, ID %02x %02x\n",
++		ret, id[0], id[1]);
++
++	return ret;
++}
++
++/* True if the controller has fallen back to its ROM boot loader */
++static bool fts_in_rom_boot(struct fts_ts *ts)
++{
++	u8 id[2], state;
++
++	if (fts_check_boot_id(ts, id))
++		return false;
++
++	if (fts_read_u8(ts, FTS_REG_BOOT_STATE, &state))
++		return false;
++
++	return state == FTS_BOOT_STATE_ROM;
++}
++
++/* ---------------------------------------------------------------------- */
++/* Firmware download                                                      */
++/* ---------------------------------------------------------------------- */
++
++static int fts_fw_parse(struct fts_ts *ts)
++{
++	const struct firmware *fw = ts->fw;
++	u16 len, len_n;
++
++	if (fw->size < FTS_FW_MIN_LEN) {
++		dev_err(&ts->spi->dev, "firmware too short (%zu bytes)\n", fw->size);
++		return -EINVAL;
++	}
++
++	/* Length of the application in 16 bit words, followed by its complement */
++	len = get_unaligned_be16(&fw->data[FTS_APP_INFO_OFF]);
++	len_n = get_unaligned_be16(&fw->data[FTS_APP_INFO_OFF + 2]);
++	if ((u16)(len + len_n) != 0xffff) {
++		dev_err(&ts->spi->dev, "bad application length %04x/%04x\n", len, len_n);
++		return -EINVAL;
++	}
++
++	ts->app_len = len * 2;
++	if (ts->app_len < FTS_FW_MIN_LEN || ts->app_len > FTS_APP_MAX_LEN ||
++	    ts->app_len > fw->size) {
++		dev_err(&ts->spi->dev, "bad application length %u (image %zu bytes)\n",
++			ts->app_len, fw->size);
++		return -EINVAL;
++	}
++
++	dev_info(&ts->spi->dev, "firmware %s: %zu bytes, application %u bytes\n",
++		 ts->fw_name, fw->size, ts->app_len);
++
++	return 0;
++}
++
++static void fts_fw_release(struct fts_ts *ts)
++{
++	release_firmware(ts->fw);
++	ts->fw = NULL;
++	ts->app_len = 0;
++}
++
++static int fts_write_pram(struct fts_ts *ts)
++{
++	const u8 *data = ts->fw->data;
++	u32 offset, len;
++	u8 addr[3];
++	int ret;
++
++	for (offset = 0; offset < ts->app_len; offset += len) {
++		len = min_t(u32, ts->app_len - offset, FTS_PACKET_LEN);
++
++		put_unaligned_be24(offset, addr);
++		ret = fts_write(ts, FTS_CMD_SET_PRAM_ADDR, addr, sizeof(addr));
++		if (ret)
++			return ret;
++
++		ret = fts_write(ts, FTS_CMD_WRITE_PRAM, &data[offset], len);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static u16 fts_ecc_host(const u8 *data, u32 len)
++{
++	u16 ecc = 0;
++	u32 i;
++	int j;
++
++	for (i = 0; i < len; i += 2) {
++		ecc ^= get_unaligned_be16(&data[i]);
++		for (j = 0; j < 16; j++)
++			ecc = (ecc & 1) ? (ecc >> 1) ^ FTS_ECC_POLY : ecc >> 1;
++	}
++
++	return ecc;
++}
++
++static int fts_ecc_tp(struct fts_ts *ts, u32 addr, u32 len, u16 *ecc)
++{
++	u8 cmd[6], val[2];
++	int i, ret;
++
++	put_unaligned_be24(addr, &cmd[0]);
++	put_unaligned_be24(len, &cmd[3]);
++	ret = fts_write(ts, FTS_CMD_ECC, cmd, sizeof(cmd));
++	if (ret)
++		return ret;
++
++	usleep_range(2000, 3000);
++
++	for (i = 0; i < FTS_ECC_FINISH_TRIES; i++) {
++		ret = fts_read_u8(ts, FTS_CMD_ECC_FINISH, val);
++		if (ret)
++			return ret;
++		if (val[0] == FTS_ECC_FINISH_OK)
++			break;
++
++		usleep_range(1000, 1100);
++	}
++	if (i == FTS_ECC_FINISH_TRIES)
++		return -ETIMEDOUT;
++
++	ret = fts_read(ts, FTS_CMD_ECC_READ, val, sizeof(val));
++	if (ret)
++		return ret;
++
++	*ecc = get_unaligned_be16(val);
++
++	return 0;
++}
++
++static int fts_ecc_check(struct fts_ts *ts)
++{
++	const u8 *data = ts->fw->data;
++	u32 offset, len;
++	u16 host, tp;
++	int ret;
++
++	for (offset = 0; offset < ts->app_len; offset += len) {
++		len = min_t(u32, ts->app_len - offset, FTS_ECC_LEN_MAX);
++
++		host = fts_ecc_host(&data[offset], len);
++		ret = fts_ecc_tp(ts, offset, len, &tp);
++		if (ret)
++			return ret;
++
++		if (host != tp) {
++			dev_err(&ts->spi->dev, "ECC mismatch at 0x%x: host %04x, controller %04x\n",
++				offset, host, tp);
++			return -EIO;
++		}
++	}
++
++	return 0;
++}
++
++static int fts_download_firmware_once(struct fts_ts *ts)
++{
++	int ret;
++
++	ret = fts_enter_boot(ts);
++	if (ret)
++		return ret;
++
++	ret = fts_write_pram(ts);
++	if (ret) {
++		dev_err(&ts->spi->dev, "writing program RAM failed: %d\n", ret);
++		return ret;
++	}
++
++	ret = fts_ecc_check(ts);
++	if (ret)
++		return ret;
++
++	/* Remap the program RAM and run the firmware */
++	ret = fts_write(ts, FTS_CMD_START_APP, NULL, 0);
++	if (ret)
++		return ret;
++
++	usleep_range(10000, 11000);
++
++	return 0;
++}
++
++static int fts_download_firmware(struct fts_ts *ts)
++{
++	int retry, ret;
++
++	for (retry = 0; retry < FTS_DOWNLOAD_TRIES; retry++) {
++		ret = fts_download_firmware_once(ts);
++		if (!ret)
++			return 0;
++
++		dev_warn(&ts->spi->dev, "firmware download attempt %d failed: %d\n",
++			 retry + 1, ret);
++	}
++
++	return ret;
++}
++
++/* Wait for the firmware to come up; the vendor carries on regardless */
++static void fts_wait_fw_valid(struct fts_ts *ts)
++{
++	u8 id = 0, ver = 0;
++	int i;
++
++	msleep(50);
++
++	for (i = 0; i < FTS_VALID_TRIES; i++) {
++		if (!fts_read_u8(ts, FTS_REG_CHIP_ID, &id) && id == FTS_CHIP_ID_H)
++			break;
++
++		msleep(FTS_VALID_INTERVAL_MS);
++	}
++
++	if (i == FTS_VALID_TRIES) {
++		dev_warn(&ts->spi->dev, "firmware not ready, chip ID 0x%02x\n", id);
++		return;
++	}
++
++	fts_read_u8(ts, FTS_REG_FW_VER, &ver);
++	dev_info(&ts->spi->dev, "firmware running, chip ID 0x%02x, version 0x%02x\n",
++		 id, ver);
++}
++
++/* ---------------------------------------------------------------------- */
++/* Start / stop                                                           */
++/* ---------------------------------------------------------------------- */
++
++static void fts_release_fingers(struct fts_ts *ts)
++{
++	input_mt_sync_frame(ts->input);
++	input_sync(ts->input);
++}
++
++static void fts_fw_retry(struct fts_ts *ts, const char *what, int err)
++{
++	if (++ts->fw_tries >= FTS_FW_LOAD_TRIES) {
++		dev_err(&ts->spi->dev, "%s failed (%d), giving up\n", what, err);
++		return;
++	}
++
++	if (ts->fw_tries == 1)
++		dev_warn(&ts->spi->dev, "%s failed (%d), will retry\n", what, err);
++
++	schedule_delayed_work(&ts->fw_work, msecs_to_jiffies(FTS_FW_RETRY_MS));
++}
++
++static void fts_fw_work(struct work_struct *work)
++{
++	struct fts_ts *ts = container_of(work, struct fts_ts, fw_work.work);
++	ktime_t start;
++	int ret;
++
++	guard(mutex)(&ts->lock);
++
++	if (!ts->enabled || ts->running)
++		return;
++
++	if (!ts->fw) {
++		ret = firmware_request_nowarn(&ts->fw, ts->fw_name, &ts->spi->dev);
++		if (ret) {
++			ts->fw = NULL;
++			/* The image may live on a filesystem that is not there yet */
++			fts_fw_retry(ts, "loading the firmware image", ret);
++			return;
++		}
++
++		ret = fts_fw_parse(ts);
++		if (ret) {
++			fts_fw_release(ts);
++			return;
++		}
++	}
++
++	start = ktime_get();
++	ret = fts_download_firmware(ts);
++	if (ret) {
++		fts_fw_retry(ts, "firmware download", ret);
++		return;
++	}
++
++	dev_info(&ts->spi->dev, "firmware downloaded in %lld ms\n",
++		 ktime_ms_delta(ktime_get(), start));
++
++	fts_wait_fw_valid(ts);
++
++	ts->fw_tries = 0;
++	ts->running = true;
++	enable_irq(ts->spi->irq);
++}
++
++static void fts_start(struct fts_ts *ts, unsigned int delay_ms)
++{
++	scoped_guard(mutex, &ts->lock) {
++		ts->enabled = true;
++		ts->fw_tries = 0;
++	}
++
++	schedule_delayed_work(&ts->fw_work, msecs_to_jiffies(delay_ms));
++}
++
++static void fts_stop(struct fts_ts *ts)
++{
++	bool was_running;
++
++	scoped_guard(mutex, &ts->lock) {
++		ts->enabled = false;
++		was_running = ts->running;
++		ts->running = false;
++		if (was_running)
++			disable_irq_nosync(ts->spi->irq);
++	}
++
++	cancel_delayed_work_sync(&ts->fw_work);
++
++	if (!was_running)
++		return;
++
++	/* Wait for a report that is being handled right now */
++	synchronize_irq(ts->spi->irq);
++
++	guard(mutex)(&ts->lock);
++	fts_write_u8(ts, FTS_REG_POWER_MODE, FTS_POWER_MODE_SLEEP);
++	fts_release_fingers(ts);
++}
++
++/* ---------------------------------------------------------------------- */
++/* Touch reports                                                          */
++/* ---------------------------------------------------------------------- */
++
++static bool fts_is_recovery_pattern(const u8 *data, int ret)
++{
++	if (data[1] == FTS_RECOVERY_PATTERN && data[2] == FTS_RECOVERY_PATTERN &&
++	    data[3] == FTS_RECOVERY_PATTERN)
++		return true;
++
++	return ret && data[0] == FTS_RECOVERY_PATTERN;
++}
++
++static bool fts_is_blank_report(const u8 *data)
++{
++	int i;
++
++	for (i = 1; i <= 5; i++) {
++		if (data[i] != 0xff)
++			return false;
++	}
++
++	return true;
++}
++
++static void fts_report_fingers(struct fts_ts *ts, const u8 *data)
++{
++	unsigned int num_points = data[1] & 0x0f;
++	unsigned int i, n = 0;
++
++	if (num_points > FTS_MAX_FINGERS)
++		return;
++
++	/* Validate the whole report before passing anything on */
++	for (i = 0; i < FTS_MAX_FINGERS; i++) {
++		const u8 *p = &data[2 + i * FTS_FINGER_LEN];
++		unsigned int event = p[0] >> 6;
++
++		if ((p[2] >> 4) >= FTS_MAX_ID)
++			break;
++		if ((event == FTS_EVENT_DOWN || event == FTS_EVENT_CONTACT) && !num_points)
++			return;
++		n++;
++	}
++
++	for (i = 0; i < n; i++) {
++		const u8 *p = &data[2 + i * FTS_FINGER_LEN];
++		unsigned int event = p[0] >> 6;
++		unsigned int x, y, pressure, area;
++
++		if (event != FTS_EVENT_DOWN && event != FTS_EVENT_CONTACT)
++			continue;
++
++		x = min_t(unsigned int, ((p[0] & 0x0f) << 8) | p[1], ts->prop.max_x);
++		y = min_t(unsigned int, ((p[2] & 0x0f) << 8) | p[3], ts->prop.max_y);
++		pressure = p[4] ?: FTS_DEFAULT_PRESSURE;
++		area = (p[5] >> 4) ?: FTS_DEFAULT_AREA;
++
++		input_mt_slot(ts->input, p[2] >> 4);
++		input_mt_report_slot_state(ts->input, MT_TOOL_FINGER, true);
++		touchscreen_report_pos(ts->input, &ts->prop, x, y, true);
++		input_report_abs(ts->input, ABS_MT_TOUCH_MAJOR, area);
++		input_report_abs(ts->input, ABS_MT_PRESSURE, pressure);
++	}
++
++	/* Fingers that are no longer reported as down are released here */
++	input_mt_sync_frame(ts->input);
++	input_sync(ts->input);
++}
++
++static irqreturn_t fts_irq_thread(int irq, void *dev_id)
++{
++	struct fts_ts *ts = dev_id;
++	u8 data[FTS_POINT_DATA_LEN];
++	int ret;
++
++	guard(mutex)(&ts->lock);
++
++	if (!ts->running)
++		return IRQ_HANDLED;
++
++	memset(data, 0xff, sizeof(data));
++	ret = fts_read(ts, FTS_REG_POINT_DATA, data, sizeof(data));
++
++	/* The controller lost its firmware (ESD, panel reset): load it again */
++	if (fts_is_recovery_pattern(data, ret)) {
++		fts_release_fingers(ts);
++		if (fts_in_rom_boot(ts)) {
++			dev_warn(&ts->spi->dev, "controller was reset, reloading firmware\n");
++			ts->running = false;
++			disable_irq_nosync(irq);
++			ts->fw_tries = 0;
++			schedule_delayed_work(&ts->fw_work, 0);
++		}
++		return IRQ_HANDLED;
++	}
++
++	if (ret) {
++		dev_err_ratelimited(&ts->spi->dev, "failed to read touch data: %d\n", ret);
++		return IRQ_HANDLED;
++	}
++
++	/* An in-cell controller returns all ones while it is busy */
++	if ((data[1] & 0x0f) == 0x0f && fts_is_blank_report(data)) {
++		fts_release_fingers(ts);
++		return IRQ_HANDLED;
++	}
++
++	fts_report_fingers(ts, data);
++
++	return IRQ_HANDLED;
++}
++
++/* ---------------------------------------------------------------------- */
++/* Panel follower and power management                                    */
++/* ---------------------------------------------------------------------- */
++
++static int fts_panel_prepared(struct drm_panel_follower *follower)
++{
++	struct fts_ts *ts = container_of(follower, struct fts_ts, follower);
++
++	/* The panel reset wiped the touch firmware; load it once the panel is up */
++	fts_start(ts, FTS_FW_PANEL_DELAY_MS);
++
++	return 0;
++}
++
++static int fts_panel_unpreparing(struct drm_panel_follower *follower)
++{
++	struct fts_ts *ts = container_of(follower, struct fts_ts, follower);
++
++	fts_stop(ts);
++
++	return 0;
++}
++
++static const struct drm_panel_follower_funcs fts_panel_follower_funcs = {
++	.panel_prepared = fts_panel_prepared,
++	.panel_unpreparing = fts_panel_unpreparing,
++};
++
++static int fts_suspend(struct device *dev)
++{
++	struct fts_ts *ts = dev_get_drvdata(dev);
++
++	if (!ts->is_follower)
++		fts_stop(ts);
++
++	return 0;
++}
++
++static int fts_resume(struct device *dev)
++{
++	struct fts_ts *ts = dev_get_drvdata(dev);
++
++	if (!ts->is_follower)
++		fts_start(ts, FTS_FW_PANEL_DELAY_MS);
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(fts_pm_ops, fts_suspend, fts_resume);
++
++/* ---------------------------------------------------------------------- */
++/* Probe                                                                  */
++/* ---------------------------------------------------------------------- */
++
++static void fts_cleanup(void *data)
++{
++	struct fts_ts *ts = data;
++
++	fts_stop(ts);
++	fts_fw_release(ts);
++}
++
++/*
++ * The touch node is shared with the drivers for the other touch controllers
++ * this tablet was built with. The bootloader names the fitted panel on the
++ * command line (msm_drm.dsi_display0=qcom,mdss_dsi_ft8201ab_<panel>_video:);
++ * only bind when that is an FT8201 panel. Returns the panel name or NULL.
++ */
++static const char *fts_find_panel(struct device *dev)
++{
++	static const char key[] = "mdss_dsi_ft8201";
++	const char *args, *s;
++
++	if (panel && *panel)
++		return strstr(panel, "ft8201") ? panel : NULL;
++
++	if (!of_chosen || of_property_read_string(of_chosen, "bootargs", &args))
++		return NULL;
++
++	s = strstr(args, key);
++	if (!s)
++		return NULL;
++
++	s += sizeof("mdss_dsi_") - 1;
++
++	return devm_kasprintf(dev, GFP_KERNEL, "%.*s", (int)strcspn(s, ": "), s);
++}
++
++/* Firmware file per panel, as chosen by the vendor driver */
++static const char *fts_fw_name_for_panel(const char *name)
++{
++	static const struct {
++		const char *panel;
++		const char *fw_name;
++	} map[] = {
++		{ "lide_hsd", "focal_ts_fw_lide_hsd.bin" },
++		{ "tianma_tianma", "focal_ts_fw_tianma_tianma.bin" },
++	};
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(map); i++) {
++		if (strstr(name, map[i].panel))
++			return map[i].fw_name;
++	}
++
++	return "focal_ts_fw.bin";
++}
++
++static int fts_probe(struct spi_device *spi)
++{
++	struct device *dev = &spi->dev;
++	struct input_dev *input;
++	const char *panel_name;
++	struct fts_ts *ts;
++	int ret;
++
++	/* Decide before touching any hardware: another driver may own it */
++	panel_name = fts_find_panel(dev);
++	if (!panel_name) {
++		dev_dbg(dev, "no FT8201 panel fitted\n");
++		return -ENODEV;
++	}
++
++	ts = devm_kzalloc(dev, sizeof(*ts), GFP_KERNEL);
++	if (!ts)
++		return -ENOMEM;
++
++	ts->spi = spi;
++
++	if (!spi->irq)
++		return dev_err_probe(dev, -EINVAL, "no interrupt\n");
++
++	ts->tx_buf = devm_kmalloc(dev, FTS_XFER_BUF_LEN, GFP_KERNEL);
++	ts->rx_buf = devm_kmalloc(dev, FTS_XFER_BUF_LEN, GFP_KERNEL);
++	if (!ts->tx_buf || !ts->rx_buf)
++		return -ENOMEM;
++
++	ret = devm_mutex_init(dev, &ts->lock);
++	if (ret)
++		return ret;
++
++	INIT_DELAYED_WORK(&ts->fw_work, fts_fw_work);
++	spi_set_drvdata(spi, ts);
++
++	/* Reset is active low; keep the controller running */
++	ts->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_LOW);
++	if (IS_ERR(ts->reset_gpio))
++		return dev_err_probe(dev, PTR_ERR(ts->reset_gpio),
++				     "failed to get reset GPIO\n");
++
++	spi->mode = SPI_MODE_0;
++	spi->bits_per_word = 8;
++	ret = spi_setup(spi);
++	if (ret)
++		return dev_err_probe(dev, ret, "SPI setup failed\n");
++
++	ts->fw_name = fts_fw_name_for_panel(panel_name);
++	dev_info(dev, "panel %s, firmware %s\n", panel_name, ts->fw_name);
++
++	input = devm_input_allocate_device(dev);
++	if (!input)
++		return -ENOMEM;
++
++	ts->input = input;
++	input->name = "FocalTech FT8201 Touchscreen";
++	input->id.bustype = BUS_SPI;
++
++	input_set_abs_params(input, ABS_MT_POSITION_X, 0, FTS_MAX_X - 1, 0, 0);
++	input_set_abs_params(input, ABS_MT_POSITION_Y, 0, FTS_MAX_Y - 1, 0, 0);
++	input_set_abs_params(input, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
++	input_set_abs_params(input, ABS_MT_PRESSURE, 0, 255, 0, 0);
++	touchscreen_parse_properties(input, true, &ts->prop);
++
++	ret = input_mt_init_slots(input, FTS_MAX_FINGERS,
++				  INPUT_MT_DIRECT | INPUT_MT_DROP_UNUSED);
++	if (ret)
++		return ret;
++
++	/*
++	 * The interrupt line is shared with the other controllers' nodes,
++	 * which use a different polarity: the FocalTech firmware pulses it low.
++	 */
++	ret = devm_request_threaded_irq(dev, spi->irq, NULL, fts_irq_thread,
++					IRQF_TRIGGER_FALLING | IRQF_ONESHOT |
++					IRQF_NO_AUTOEN,
++					dev_name(dev), ts);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to request interrupt\n");
++
++	ret = input_register_device(input);
++	if (ret)
++		return ret;
++
++	ret = devm_add_action_or_reset(dev, fts_cleanup, ts);
++	if (ret)
++		return ret;
++
++	ts->is_follower = drm_is_panel_follower(dev);
++	if (ts->is_follower) {
++		ts->follower.funcs = &fts_panel_follower_funcs;
++		ret = devm_drm_panel_add_follower(dev, &ts->follower);
++		if (ret)
++			return dev_err_probe(dev, ret, "failed to follow the panel\n");
++	} else {
++		dev_warn(dev, "no panel to follow, assuming the display is already on\n");
++		fts_start(ts, 0);
++	}
++
++	return 0;
++}
++
++static const struct of_device_id fts_of_match[] = {
++	{ .compatible = "focaltech,ft8201-spi" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, fts_of_match);
++
++static const struct spi_device_id fts_spi_ids[] = {
++	{ "ft8201-spi" },
++	{ }
++};
++MODULE_DEVICE_TABLE(spi, fts_spi_ids);
++
++static struct spi_driver fts_spi_driver = {
++	.driver = {
++		.name = "focaltech-ft8201-spi",
++		.of_match_table = fts_of_match,
++		.pm = pm_sleep_ptr(&fts_pm_ops),
++	},
++	.probe = fts_probe,
++	.id_table = fts_spi_ids,
++};
++module_spi_driver(fts_spi_driver);
++
++MODULE_DESCRIPTION("FocalTech FT8201 SPI touchscreen driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/input/touchscreen/himax-hx83102e-spi.c b/drivers/input/touchscreen/himax-hx83102e-spi.c
+new file mode 100644
+index 000000000..df57c5b82
+--- /dev/null
++++ b/drivers/input/touchscreen/himax-hx83102e-spi.c
+@@ -0,0 +1,1442 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Himax HX83102E SPI touchscreen driver (in-cell TDDI, "zero flash")
++ *
++ * The touch controller shares its silicon with the display driver and has
++ * no flash of its own: the host has to load the touch firmware into the
++ * controller's SRAM over SPI every time the panel has been reset.
++ *
++ * Protocol and register layout taken from the downstream "hxchipset" driver,
++ * Copyright (C) 2019 Himax Corporation.
++ */
++
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/firmware.h>
++#include <linux/gpio/consumer.h>
++#include <linux/input.h>
++#include <linux/input/mt.h>
++#include <linux/input/touchscreen.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/pm.h>
++#include <linux/slab.h>
++#include <linux/spi/spi.h>
++#include <linux/string.h>
++#include <linux/unaligned.h>
++#include <linux/workqueue.h>
++
++#include <drm/drm_panel.h>
++
++#define HX_SPI_WRITE			0xf2
++#define HX_SPI_READ			0xf3
++
++/* Bus registers, accessed directly with HX_SPI_WRITE / HX_SPI_READ */
++#define HX_REG_AHB_ADDR			0x00
++#define HX_REG_AHB_RDATA		0x08
++#define HX_REG_AHB_DIR			0x0c
++#define HX_REG_INCR4			0x0d
++#define HX_REG_AHB_BURST		0x11
++#define HX_REG_CONTI			0x13
++#define HX_REG_EVENT			0x30
++#define HX_REG_PSW_LB			0x31
++#define HX_REG_PSW_UB			0x32
++
++#define HX_AHB_DIR_READ			0x00
++#define HX_CONTI_EN			0x31
++#define HX_INCR4_EN			0x10
++#define HX_INCR4_AUTO			0x01
++#define HX_PSW_LB_SAFE			0x27
++#define HX_PSW_UB_SAFE			0x95
++
++/* Registers on the internal AHB bus */
++#define HX_ADDR_SYSTEM_RESET		0x90000018
++#define HX_ADDR_ACTIVE_RELOAD		0x90000048
++#define HX_ADDR_CTRL_FW			0x9000005c
++#define HX_ADDR_CS_CENTRAL_STATE	0x900000a8
++#define HX_ADDR_ICID			0x900000d0
++#define HX_ADDR_RESET_EVENT		0x900000e4
++#define HX_ADDR_TCON_RST		0x80020020
++#define HX_ADDR_ADC_RST			0x80020094
++#define HX_ADDR_RELOAD_STATUS		0x80050000
++#define HX_ADDR_RELOAD_CRC32		0x80050018
++#define HX_ADDR_RELOAD_FROM		0x80050020
++#define HX_ADDR_RELOAD_CMD		0x80050028
++#define HX_ADDR_FLASH_RELOAD		0x10007f00
++#define HX_ADDR_RELOAD_DONE		0x100072c0
++#define HX_ADDR_SET_FRAME		0x10007294
++
++#define HX_DATA_SYSTEM_RESET		0x55
++#define HX_DATA_FW_STOP			0xa5
++#define HX_DATA_ACTIVE_RELOAD		0xec
++#define HX_ACTIVE_RELOAD_ACK		0x01ec
++#define HX_DATA_DIS_FLASH_RELOAD	0x9aa9
++#define HX_RELOAD_DONE			0x72c0
++#define HX_RESET_EVENT_DONE		0x0200
++#define HX_RELOAD_CMD_CRC		0x00990000
++
++#define HX_STATE_FW_RUNNING		0x05
++#define HX_STATE_SAFE_MODE		0x0c
++
++/* One AHB write carries at most this much data, as in the vendor driver */
++#define HX_AHB_CHUNK			0x10000
++#define HX_TX_BUF_LEN			(2 + 4 + HX_AHB_CHUNK)
++#define HX_MAX_READ_LEN			256
++
++/* Zero flash image layout */
++#define HX_FW_CFG_TABLE			0x10000
++#define HX_FW_PART_ENTRY_LEN		16
++#define HX_FW_MAIN_LEN			0xc000
++#define HX_FW_FIXED_MIN_LEN		0xe600
++#define HX_DSRAM_SIZE			0x8000
++#define HX_CRC_POLY			0x82f63b78
++
++/* Touch report: 10 fingers, see the vendor's himax_report_data_init() */
++#define HX_MAX_FINGERS			10
++#define HX_X_RES			1200
++#define HX_Y_RES			2000
++#define HX_COORD_LEN			(HX_MAX_FINGERS * 4)
++#define HX_AREA_LEN			(DIV_ROUND_UP(HX_MAX_FINGERS, 4) * 4)
++#define HX_POINT_CNT_POS		(HX_COORD_LEN + HX_AREA_LEN)
++#define HX_TOUCH_INFO_LEN		(HX_POINT_CNT_POS + 4)
++#define HX_EVENT_STACK_LEN		128
++
++#define HX_EXCP_ED_COUNT		5
++
++#define HX_FW_LOAD_TRIES		20
++#define HX_FW_RETRY_MS			3000
++#define HX_FW_PANEL_DELAY_MS		100
++
++struct hx_sense_off_cfg {
++	unsigned int stop_delay_us;
++	unsigned int running_delay_us;
++	unsigned int tries;
++	unsigned int retry_delay_us;
++	bool tcon_release;
++	bool adc_reset;
++};
++
++struct hx_chip_data {
++	const char *name;
++	u8 id;
++	/* SRAM targets of the fixed (<= 64 KiB) image layout */
++	u32 sram_start;
++	u32 adc_cfg_1;
++	u32 adc_cfg_2;
++	/* Version bytes inside the firmware image */
++	u32 fw_ver_offset;
++	u32 cfg_ver_offset;
++	struct hx_sense_off_cfg sense_off;
++	/* Switch AHB burst reads off around event stack reads */
++	bool event_burst_off;
++};
++
++struct hx_ts {
++	struct spi_device *spi;
++	struct input_dev *input;
++	struct touchscreen_properties prop;
++	struct gpio_desc *reset_gpio;
++	const struct hx_chip_data *chip;
++
++	/* Serialises all SPI traffic and the firmware state below */
++	struct mutex lock;
++	u8 *tx_buf;
++	u8 *rx_buf;
++
++	struct drm_panel_follower follower;
++	bool is_follower;
++	struct delayed_work fw_work;
++
++	const char *fw_name;
++	const struct firmware *fw;
++	/* Image with a partition table (> 64 KiB): main code plus DSRAM config */
++	bool fw_partitioned;
++	u32 main_sram;
++	u32 main_offset;
++	u32 main_len;
++	u8 *cfg_buf;
++	u32 cfg_sram;
++	u32 cfg_len;
++	u32 cfg_crc;
++	unsigned int fw_tries;
++
++	/* The panel is up and the controller is supposed to be working */
++	bool enabled;
++	/* Firmware is loaded and the interrupt is enabled */
++	bool running;
++	unsigned int ed_count;
++
++	u8 scratch[HX_EVENT_STACK_LEN];
++};
++
++static char *panel;
++module_param(panel, charp, 0444);
++MODULE_PARM_DESC(panel, "Panel name to use instead of the one on the kernel command line, e.g. hx83102e_txd_auo");
++
++/* ---------------------------------------------------------------------- */
++/* SPI access                                                             */
++/* ---------------------------------------------------------------------- */
++
++static int hx_bus_write(struct hx_ts *ts, u8 reg, const u8 *data, size_t len)
++{
++	if (len > HX_TX_BUF_LEN - 2)
++		return -EINVAL;
++
++	ts->tx_buf[0] = HX_SPI_WRITE;
++	ts->tx_buf[1] = reg;
++	memcpy(&ts->tx_buf[2], data, len);
++
++	return spi_write(ts->spi, ts->tx_buf, len + 2);
++}
++
++static int hx_bus_write_u8(struct hx_ts *ts, u8 reg, u8 val)
++{
++	return hx_bus_write(ts, reg, &val, 1);
++}
++
++static int hx_bus_read(struct hx_ts *ts, u8 reg, u8 *data, size_t len)
++{
++	struct spi_transfer xfers[2] = {
++		{ .tx_buf = ts->tx_buf, .len = 3 },
++		{ .rx_buf = ts->rx_buf, .len = len },
++	};
++	int ret;
++
++	if (!len || len > HX_MAX_READ_LEN)
++		return -EINVAL;
++
++	ts->tx_buf[0] = HX_SPI_READ;
++	ts->tx_buf[1] = reg;
++	ts->tx_buf[2] = 0x00;
++
++	ret = spi_sync_transfer(ts->spi, xfers, ARRAY_SIZE(xfers));
++	if (ret)
++		return ret;
++
++	memcpy(data, ts->rx_buf, len);
++
++	return 0;
++}
++
++static int hx_burst_enable(struct hx_ts *ts, bool auto_incr)
++{
++	int ret;
++
++	ret = hx_bus_write_u8(ts, HX_REG_CONTI, HX_CONTI_EN);
++	if (ret)
++		return ret;
++
++	return hx_bus_write_u8(ts, HX_REG_INCR4,
++			       HX_INCR4_EN | (auto_incr ? HX_INCR4_AUTO : 0));
++}
++
++static int hx_reg_read(struct hx_ts *ts, u32 addr, u8 *data, size_t len)
++{
++	u8 buf[4];
++	int ret;
++
++	if (len > HX_MAX_READ_LEN)
++		return -EINVAL;
++
++	ret = hx_burst_enable(ts, len > 4);
++	if (ret)
++		return ret;
++
++	put_unaligned_le32(addr, buf);
++	ret = hx_bus_write(ts, HX_REG_AHB_ADDR, buf, sizeof(buf));
++	if (ret)
++		return ret;
++
++	ret = hx_bus_write_u8(ts, HX_REG_AHB_DIR, HX_AHB_DIR_READ);
++	if (ret)
++		return ret;
++
++	ret = hx_bus_read(ts, HX_REG_AHB_RDATA, data, len);
++	if (ret)
++		return ret;
++
++	if (len > 4)
++		ret = hx_burst_enable(ts, false);
++
++	return ret;
++}
++
++static int hx_reg_read32(struct hx_ts *ts, u32 addr, u32 *val)
++{
++	u8 buf[4];
++	int ret;
++
++	ret = hx_reg_read(ts, addr, buf, sizeof(buf));
++	if (ret)
++		return ret;
++
++	*val = get_unaligned_le32(buf);
++
++	return 0;
++}
++
++static int hx_reg_write(struct hx_ts *ts, u32 addr, const u8 *data, size_t len)
++{
++	int ret;
++
++	ret = hx_burst_enable(ts, len > 4);
++	if (ret)
++		return ret;
++
++	while (len) {
++		size_t n = min_t(size_t, len, HX_AHB_CHUNK);
++
++		ts->tx_buf[0] = HX_SPI_WRITE;
++		ts->tx_buf[1] = HX_REG_AHB_ADDR;
++		put_unaligned_le32(addr, &ts->tx_buf[2]);
++		memcpy(&ts->tx_buf[6], data, n);
++
++		ret = spi_write(ts->spi, ts->tx_buf, n + 6);
++		if (ret)
++			return ret;
++
++		addr += n;
++		data += n;
++		len -= n;
++
++		if (len)
++			usleep_range(100, 200);
++	}
++
++	return 0;
++}
++
++static int hx_reg_write32(struct hx_ts *ts, u32 addr, u32 val)
++{
++	u8 buf[4];
++
++	put_unaligned_le32(val, buf);
++
++	return hx_reg_write(ts, addr, buf, sizeof(buf));
++}
++
++/* ---------------------------------------------------------------------- */
++/* Controller state                                                       */
++/* ---------------------------------------------------------------------- */
++
++static void hx_pin_reset(struct hx_ts *ts, unsigned int low_ms, unsigned int high_ms)
++{
++	gpiod_set_value_cansleep(ts->reset_gpio, 1);
++	msleep(low_ms);
++	gpiod_set_value_cansleep(ts->reset_gpio, 0);
++	msleep(high_ms);
++}
++
++/* Wake up the bus interface and switch on burst mode */
++static int hx_interface_on(struct hx_ts *ts)
++{
++	u8 conti, incr4, dummy[4];
++	int retry, ret;
++
++	ret = hx_bus_read(ts, HX_REG_AHB_RDATA, dummy, sizeof(dummy));
++	if (ret)
++		return ret;
++
++	for (retry = 0; retry < 10; retry++) {
++		ret = hx_bus_write_u8(ts, HX_REG_CONTI, HX_CONTI_EN);
++		if (!ret)
++			ret = hx_bus_write_u8(ts, HX_REG_INCR4, HX_INCR4_EN);
++		if (!ret)
++			ret = hx_bus_read(ts, HX_REG_CONTI, &conti, 1);
++		if (!ret)
++			ret = hx_bus_read(ts, HX_REG_INCR4, &incr4, 1);
++		if (ret)
++			return ret;
++
++		if (conti == HX_CONTI_EN && incr4 == HX_INCR4_EN)
++			return 0;
++
++		usleep_range(1000, 1100);
++	}
++
++	dev_dbg(&ts->spi->dev, "burst mode did not stick (%02x %02x)\n", conti, incr4);
++
++	return 0;
++}
++
++/* Software reset, used by the vendor when there is no reset GPIO */
++static int hx_system_reset(struct hx_ts *ts)
++{
++	int retry, ret;
++	u32 val;
++
++	ret = hx_interface_on(ts);
++	if (ret)
++		return ret;
++
++	ret = hx_reg_write32(ts, HX_ADDR_CTRL_FW, 0);
++	if (ret)
++		return ret;
++
++	for (retry = 0; retry < 6; retry++) {
++		hx_bus_write_u8(ts, HX_REG_PSW_LB, HX_PSW_LB_SAFE);
++		hx_bus_write_u8(ts, HX_REG_PSW_UB, HX_PSW_UB_SAFE);
++		hx_bus_write_u8(ts, HX_REG_PSW_LB, 0x00);
++		usleep_range(10000, 11000);
++
++		ret = hx_reg_read32(ts, HX_ADDR_RESET_EVENT, &val);
++		if (ret)
++			return ret;
++		if ((val & 0xffff) == HX_RESET_EVENT_DONE)
++			return 0;
++	}
++
++	return -ETIMEDOUT;
++}
++
++static int hx_ic_reset(struct hx_ts *ts)
++{
++	int ret;
++
++	if (ts->reset_gpio) {
++		hx_pin_reset(ts, 5, 5);
++		return 0;
++	}
++
++	ret = hx_system_reset(ts);
++	if (ret == -ETIMEDOUT) {
++		dev_warn(&ts->spi->dev, "software reset not acknowledged\n");
++		ret = 0;
++	}
++
++	return ret;
++}
++
++/* Stop the firmware and put the MCU into safe mode for SRAM access */
++static int hx_sense_off(struct hx_ts *ts, const struct hx_sense_off_cfg *cfg)
++{
++	unsigned int i;
++	u32 state;
++	int ret;
++
++	ret = hx_reg_write32(ts, HX_ADDR_CTRL_FW, HX_DATA_FW_STOP);
++	if (ret)
++		return ret;
++	usleep_range(cfg->stop_delay_us, cfg->stop_delay_us + 100);
++
++	ret = hx_reg_read32(ts, HX_ADDR_CS_CENTRAL_STATE, &state);
++	if (ret)
++		return ret;
++	if ((state & 0xff) == HX_STATE_FW_RUNNING && cfg->running_delay_us)
++		usleep_range(cfg->running_delay_us, cfg->running_delay_us + 100);
++
++	for (i = 0; i < cfg->tries; i++) {
++		ret = hx_bus_write_u8(ts, HX_REG_PSW_LB, HX_PSW_LB_SAFE);
++		if (!ret)
++			ret = hx_bus_write_u8(ts, HX_REG_PSW_UB, HX_PSW_UB_SAFE);
++		if (!ret)
++			ret = hx_reg_read32(ts, HX_ADDR_CS_CENTRAL_STATE, &state);
++		if (ret)
++			return ret;
++
++		if ((state & 0xff) == HX_STATE_SAFE_MODE) {
++			/* Reset TCON and, on some chips, the ADC */
++			ret = hx_reg_write32(ts, HX_ADDR_TCON_RST, 0);
++			if (ret)
++				return ret;
++			usleep_range(1000, 1100);
++
++			if (cfg->tcon_release) {
++				ret = hx_reg_write32(ts, HX_ADDR_TCON_RST, 1);
++				if (ret)
++					return ret;
++			}
++
++			if (cfg->adc_reset) {
++				ret = hx_reg_write32(ts, HX_ADDR_ADC_RST, 0);
++				if (ret)
++					return ret;
++				usleep_range(1000, 1100);
++				ret = hx_reg_write32(ts, HX_ADDR_ADC_RST, 1);
++			}
++
++			return ret;
++		}
++
++		usleep_range(cfg->retry_delay_us, cfg->retry_delay_us + 100);
++		if (ts->reset_gpio)
++			hx_pin_reset(ts, 20, 50);
++	}
++
++	dev_err(&ts->spi->dev, "controller did not enter safe mode, state %08x\n", state);
++
++	return -ETIMEDOUT;
++}
++
++/* Ask the boot code to (re)start the firmware that is in SRAM */
++static int hx_reload_to_active(struct hx_ts *ts)
++{
++	int retry, ret;
++	u32 val;
++
++	for (retry = 0; retry < 5; retry++) {
++		ret = hx_reg_write32(ts, HX_ADDR_ACTIVE_RELOAD, HX_DATA_ACTIVE_RELOAD);
++		if (ret)
++			return ret;
++		usleep_range(1000, 1100);
++
++		ret = hx_reg_read32(ts, HX_ADDR_ACTIVE_RELOAD, &val);
++		if (ret)
++			return ret;
++		if ((val & 0xffff) == HX_ACTIVE_RELOAD_ACK)
++			return 0;
++	}
++
++	dev_warn(&ts->spi->dev, "reload to active not acknowledged (%08x)\n", val);
++
++	return 0;
++}
++
++static int hx_sense_on(struct hx_ts *ts)
++{
++	int ret;
++
++	ret = hx_interface_on(ts);
++	if (ret)
++		return ret;
++
++	ret = hx_reg_write32(ts, HX_ADDR_CTRL_FW, 0);
++	if (ret)
++		return ret;
++	usleep_range(10000, 11000);
++
++	ret = hx_ic_reset(ts);
++	if (ret)
++		return ret;
++
++	return hx_reload_to_active(ts);
++}
++
++static const struct hx_chip_data hx83102d_data = {
++	.name			= "HX83102D",
++	.id			= 0x2d,
++	.sram_start		= 0x20000000,
++	.adc_cfg_1		= 0x10007b00,
++	.adc_cfg_2		= 0x10006a00,
++	.fw_ver_offset		= 0xc005,
++	.cfg_ver_offset		= 0xc100,
++	.sense_off = {
++		.stop_delay_us	= 10000,
++		.tries		= 6,
++		.retry_delay_us	= 5000,
++		.adc_reset	= true,
++	},
++	.event_burst_off	= true,
++};
++
++static const struct hx_chip_data hx83102e_data = {
++	.name			= "HX83102E",
++	.id			= 0x2e,
++	.sram_start		= 0x08000000,
++	.adc_cfg_1		= 0x10006a00,
++	.adc_cfg_2		= 0x10007b28,
++	.fw_ver_offset		= 0xe805,
++	.cfg_ver_offset		= 0xe900,
++	.sense_off = {
++		.stop_delay_us	= 1000,
++		.running_delay_us = 10000,
++		.tries		= 6,
++		.retry_delay_us	= 5000,
++	},
++};
++
++/* Used before the chip is known, as in the vendor's hx83102_chip_detect() */
++static const struct hx_sense_off_cfg hx_detect_sense_off = {
++	.stop_delay_us	= 20000,
++	.tries		= 16,
++	.retry_delay_us	= 10000,
++	.tcon_release	= true,
++	.adc_reset	= true,
++};
++
++static int hx_identify_chip(struct hx_ts *ts)
++{
++	static const struct hx_chip_data * const chips[] = {
++		&hx83102d_data, &hx83102e_data,
++	};
++	u8 id[4] = { }, dummy;
++	int retry, i, ret;
++
++	if (ts->reset_gpio)
++		hx_pin_reset(ts, 20, 50);
++
++	ret = hx_bus_read(ts, HX_REG_CONTI, &dummy, 1);
++	if (ret)
++		return ret;
++
++	ret = hx_sense_off(ts, &hx_detect_sense_off);
++	if (ret)
++		return ret;
++
++	for (retry = 0; retry < 5; retry++) {
++		ret = hx_reg_read(ts, HX_ADDR_ICID, id, sizeof(id));
++		if (ret)
++			return ret;
++
++		if (id[3] != 0x83 || id[2] != 0x10)
++			continue;
++
++		for (i = 0; i < ARRAY_SIZE(chips); i++) {
++			if (id[1] == chips[i]->id) {
++				ts->chip = chips[i];
++				dev_info(&ts->spi->dev, "found %s, chip ID %*ph\n",
++					 ts->chip->name, (int)sizeof(id), id);
++				return 0;
++			}
++		}
++
++		dev_err(&ts->spi->dev, "unsupported HX8310%x\n", id[1] & 0xf);
++		return -ENODEV;
++	}
++
++	dev_err(&ts->spi->dev, "unexpected chip ID %*ph\n", (int)sizeof(id), id);
++
++	return -ENODEV;
++}
++
++/* ---------------------------------------------------------------------- */
++/* Firmware image parsing                                                 */
++/* ---------------------------------------------------------------------- */
++
++/* CRC-32C over little endian words, no final inversion, as the hardware does */
++static u32 hx_crc32(const u8 *data, size_t len)
++{
++	u32 crc = 0xffffffff;
++	size_t i;
++	int bit;
++
++	for (i = 0; i + 4 <= len; i += 4) {
++		crc ^= get_unaligned_le32(&data[i]);
++		for (bit = 0; bit < 32; bit++)
++			crc = (crc >> 1) ^ ((crc & 1) ? HX_CRC_POLY : 0);
++	}
++
++	return crc;
++}
++
++struct hx_fw_part {
++	u32 sram;
++	u32 len;
++	u32 offset;
++};
++
++static void hx_fw_read_part(const u8 *entry, struct hx_fw_part *part)
++{
++	part->sram = get_unaligned_le32(&entry[0]);
++	part->len = get_unaligned_le32(&entry[4]);
++	part->offset = get_unaligned_le32(&entry[8]);
++}
++
++static bool hx_fw_part_valid(const struct firmware *fw, const struct hx_fw_part *part)
++{
++	return part->offset <= fw->size && part->len <= fw->size - part->offset;
++}
++
++/*
++ * Images larger than 64 KiB carry a partition table: entry 0 is the code,
++ * the others are pieces of the configuration, which are assembled into one
++ * DSRAM block and written in a single go (vendor's himax_zf_part_info()).
++ */
++static int hx_fw_parse_partitions(struct hx_ts *ts)
++{
++	const struct firmware *fw = ts->fw;
++	const u8 *table = &fw->data[HX_FW_CFG_TABLE];
++	struct hx_fw_part main, part, max_part = { };
++	u32 base = U32_MAX, max = 0, len, off;
++	unsigned int num, i;
++
++	num = table[12];
++	if (!num || fw->size - HX_FW_CFG_TABLE < num * HX_FW_PART_ENTRY_LEN) {
++		dev_err(&ts->spi->dev, "bad partition count %u\n", num);
++		return -EINVAL;
++	}
++
++	hx_fw_read_part(table, &main);
++	if (!hx_fw_part_valid(fw, &main) || !main.len) {
++		dev_err(&ts->spi->dev, "bad code partition (0x%x + 0x%x)\n",
++			main.offset, main.len);
++		return -EINVAL;
++	}
++
++	ts->main_sram = main.sram;
++	ts->main_offset = main.offset;
++	ts->main_len = main.len;
++	ts->fw_partitioned = true;
++
++	dev_dbg(&ts->spi->dev, "[0] SRAM 0x%08x size 0x%x BIN 0x%x\n",
++		main.sram, main.len, main.offset);
++
++	if (num == 1)
++		return 0;
++
++	for (i = 1; i < num; i++) {
++		hx_fw_read_part(&table[i * HX_FW_PART_ENTRY_LEN], &part);
++		if (part.sram < base) {
++			base = part.sram;
++			ts->cfg_sram = part.sram;
++		}
++		if (part.sram > max) {
++			max = part.sram;
++			max_part = part;
++		}
++	}
++
++	len = max - base + max_part.len;
++	len = ALIGN(len, 16);
++	if (len > HX_DSRAM_SIZE) {
++		dev_err(&ts->spi->dev, "configuration too large (%u bytes)\n", len);
++		return -EINVAL;
++	}
++
++	ts->cfg_buf = kzalloc(len, GFP_KERNEL);
++	if (!ts->cfg_buf)
++		return -ENOMEM;
++
++	for (i = 1; i < num; i++) {
++		hx_fw_read_part(&table[i * HX_FW_PART_ENTRY_LEN], &part);
++		/* The vendor aligns each destination down to a word */
++		off = (part.sram & ~3U) - base;
++
++		dev_dbg(&ts->spi->dev, "[%u] SRAM 0x%08x size 0x%x BIN 0x%x\n",
++			i, part.sram & ~3U, part.len, part.offset);
++
++		if ((part.sram & ~3U) < base || off > len || part.len > len - off ||
++		    !hx_fw_part_valid(fw, &part)) {
++			dev_err(&ts->spi->dev, "bad configuration partition %u\n", i);
++			kfree(ts->cfg_buf);
++			ts->cfg_buf = NULL;
++			return -EINVAL;
++		}
++
++		memcpy(&ts->cfg_buf[off], &fw->data[part.offset], part.len);
++	}
++
++	ts->cfg_len = len;
++	ts->cfg_crc = hx_crc32(ts->cfg_buf, len);
++
++	return 0;
++}
++
++static int hx_fw_parse(struct hx_ts *ts)
++{
++	const struct firmware *fw = ts->fw;
++	int ret;
++
++	ts->fw_partitioned = false;
++
++	if (fw->size > HX_FW_CFG_TABLE) {
++		ret = hx_fw_parse_partitions(ts);
++		if (ret)
++			return ret;
++	} else if (fw->size < HX_FW_FIXED_MIN_LEN) {
++		dev_err(&ts->spi->dev, "firmware image too small (%zu bytes)\n", fw->size);
++		return -EINVAL;
++	}
++
++	dev_info(&ts->spi->dev, "firmware %s: %zu bytes, %s layout\n", ts->fw_name,
++		 fw->size, ts->fw_partitioned ? "partitioned" : "fixed");
++
++	return 0;
++}
++
++static void hx_fw_release(struct hx_ts *ts)
++{
++	kfree(ts->cfg_buf);
++	ts->cfg_buf = NULL;
++	ts->cfg_len = 0;
++	release_firmware(ts->fw);
++	ts->fw = NULL;
++}
++
++/* ---------------------------------------------------------------------- */
++/* Firmware download                                                      */
++/* ---------------------------------------------------------------------- */
++
++/* Let the hardware compute the CRC of a block of SRAM */
++static int hx_hw_crc(struct hx_ts *ts, u32 addr, u32 len, u32 *crc)
++{
++	int retry, ret;
++	u32 val;
++
++	ret = hx_reg_write32(ts, HX_ADDR_RELOAD_FROM, addr);
++	if (ret)
++		return ret;
++
++	ret = hx_reg_write32(ts, HX_ADDR_RELOAD_CMD, HX_RELOAD_CMD_CRC | ((len / 4) & 0xffff));
++	if (ret)
++		return ret;
++
++	for (retry = 0; retry < 100; retry++) {
++		ret = hx_reg_read32(ts, HX_ADDR_RELOAD_STATUS, &val);
++		if (ret)
++			return ret;
++
++		if (!(val & BIT(0)))
++			return hx_reg_read32(ts, HX_ADDR_RELOAD_CRC32, crc);
++
++		usleep_range(1000, 1100);
++	}
++
++	return -ETIMEDOUT;
++}
++
++/* Write a block whose CRC, including its embedded checksum, must be zero */
++static int hx_write_sram_crc(struct hx_ts *ts, u32 addr, const u8 *data, u32 len)
++{
++	int retry, ret;
++	u32 crc = 0;
++
++	for (retry = 0; retry < 3; retry++) {
++		ret = hx_reg_write(ts, addr, data, len);
++		if (ret)
++			return ret;
++
++		ret = hx_hw_crc(ts, addr, len, &crc);
++		if (ret)
++			return ret;
++		if (!crc)
++			return 0;
++	}
++
++	dev_err(&ts->spi->dev, "HW CRC of 0x%08x + 0x%x is %08x\n", addr, len, crc);
++
++	return -EIO;
++}
++
++static int hx_write_partitions(struct hx_ts *ts)
++{
++	int retry, ret;
++	u32 crc = 0;
++
++	ret = hx_write_sram_crc(ts, ts->main_sram, &ts->fw->data[ts->main_offset],
++				ts->main_len);
++	if (ret)
++		return ret;
++
++	if (!ts->cfg_buf)
++		return 0;
++
++	for (retry = 0; retry < 4; retry++) {
++		ret = hx_reg_write(ts, ts->cfg_sram, ts->cfg_buf, ts->cfg_len);
++		if (ret)
++			return ret;
++
++		ret = hx_hw_crc(ts, ts->cfg_sram, ts->cfg_len, &crc);
++		if (ret)
++			return ret;
++		if (crc == ts->cfg_crc)
++			return 0;
++	}
++
++	dev_err(&ts->spi->dev, "configuration CRC mismatch: HW %08x, SW %08x\n",
++		crc, ts->cfg_crc);
++
++	return -EIO;
++}
++
++/* Images of up to 64 KiB use a fixed layout (vendor's himax_mcu_firmware_update_0f()) */
++static int hx_write_fixed(struct hx_ts *ts)
++{
++	const struct hx_chip_data *chip = ts->chip;
++	const struct {
++		u32 sram;
++		u32 offset;
++		u32 len;
++	} parts[] = {
++		{ 0x10007000,		0xc000, 128 },	/* config info */
++		{ 0x10007084,		0xc0fe, 528 },	/* FW config 1 */
++		{ 0x10007300,		0xca00, 128 },	/* FW config 3 */
++		{ chip->adc_cfg_1,	0xd640, 1200 },	/* ADC config 1 */
++		{ chip->adc_cfg_2,	0xd320, 800 },	/* ADC config 2 */
++		{ 0x10007500,		0xe000, 1536 },	/* mapping table */
++	};
++	const u8 *data = ts->fw->data;
++	unsigned int i;
++	int ret;
++
++	ret = hx_write_sram_crc(ts, chip->sram_start, data, HX_FW_MAIN_LEN);
++	if (ret)
++		return ret;
++
++	for (i = 0; i < ARRAY_SIZE(parts); i++) {
++		ret = hx_write_sram_crc(ts, parts[i].sram, &data[parts[i].offset],
++					parts[i].len);
++		/* The vendor only logs CRC errors of the configuration blocks */
++		if (ret == -EIO)
++			continue;
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static void hx_wait_reload_done(struct hx_ts *ts)
++{
++	int retry;
++	u32 val = 0;
++
++	for (retry = 0; retry < 30; retry++) {
++		if (!hx_reg_read32(ts, HX_ADDR_RELOAD_DONE, &val) && val == HX_RELOAD_DONE)
++			return;
++
++		usleep_range(10000, 11000);
++	}
++
++	dev_warn(&ts->spi->dev, "firmware did not report reload done (%08x)\n", val);
++}
++
++static int hx_download_firmware_once(struct hx_ts *ts)
++{
++	int ret;
++
++	ret = hx_reg_write32(ts, HX_ADDR_SYSTEM_RESET, HX_DATA_SYSTEM_RESET);
++	if (ret)
++		return ret;
++
++	/* The vendor carries on regardless; the CRC checks below catch failures */
++	ret = hx_sense_off(ts, &ts->chip->sense_off);
++	if (ret && ret != -ETIMEDOUT)
++		return ret;
++
++	if (ts->fw_partitioned)
++		ret = hx_write_partitions(ts);
++	else
++		ret = hx_write_fixed(ts);
++	if (ret)
++		return ret;
++
++	/* Reset the frame count back to 1 for normal mode */
++	ret = hx_reg_write32(ts, HX_ADDR_SET_FRAME, 1);
++	if (ret)
++		return ret;
++
++	/* There is no flash to reload from */
++	ret = hx_reg_write32(ts, HX_ADDR_FLASH_RELOAD, HX_DATA_DIS_FLASH_RELOAD);
++	if (ret)
++		return ret;
++
++	ret = hx_reg_write32(ts, HX_ADDR_RELOAD_DONE, 0);
++	if (ret)
++		return ret;
++
++	ret = hx_sense_on(ts);
++	if (ret)
++		return ret;
++
++	hx_wait_reload_done(ts);
++
++	return hx_reload_to_active(ts);
++}
++
++static int hx_download_firmware(struct hx_ts *ts)
++{
++	int retry, ret;
++
++	for (retry = 0; retry < 3; retry++) {
++		ret = hx_download_firmware_once(ts);
++		if (!ret)
++			return 0;
++
++		dev_warn(&ts->spi->dev, "firmware download attempt %d failed: %d\n",
++			 retry + 1, ret);
++	}
++
++	return ret;
++}
++
++/* ---------------------------------------------------------------------- */
++/* Start / stop                                                           */
++/* ---------------------------------------------------------------------- */
++
++static int hx_read_event(struct hx_ts *ts, u8 *data, size_t len)
++{
++	int ret;
++
++	if (ts->chip->event_burst_off) {
++		ret = hx_bus_write_u8(ts, HX_REG_AHB_BURST, 0x00);
++		if (ret)
++			return ret;
++	}
++
++	ret = hx_bus_read(ts, HX_REG_EVENT, data, len);
++
++	if (ts->chip->event_burst_off && !ret)
++		ret = hx_bus_write_u8(ts, HX_REG_AHB_BURST, 0x01);
++
++	return ret;
++}
++
++static void hx_release_fingers(struct hx_ts *ts)
++{
++	input_mt_sync_frame(ts->input);
++	input_sync(ts->input);
++}
++
++static void hx_fw_retry(struct hx_ts *ts, const char *what, int err)
++{
++	if (++ts->fw_tries >= HX_FW_LOAD_TRIES) {
++		dev_err(&ts->spi->dev, "%s failed (%d), giving up\n", what, err);
++		return;
++	}
++
++	if (ts->fw_tries == 1)
++		dev_warn(&ts->spi->dev, "%s failed (%d), will retry\n", what, err);
++
++	schedule_delayed_work(&ts->fw_work, msecs_to_jiffies(HX_FW_RETRY_MS));
++}
++
++static void hx_log_fw_version(struct hx_ts *ts)
++{
++	const struct firmware *fw = ts->fw;
++	u32 fw_off = ts->chip->fw_ver_offset;
++	u32 cfg_off = ts->chip->cfg_ver_offset;
++
++	if (fw->size <= fw_off + 1 || fw->size <= cfg_off + 1)
++		return;
++
++	dev_info(&ts->spi->dev, "firmware version %02x%02x, config version %02x%02x\n",
++		 fw->data[fw_off], fw->data[fw_off + 1],
++		 fw->data[cfg_off], fw->data[cfg_off + 1]);
++}
++
++static void hx_fw_work(struct work_struct *work)
++{
++	struct hx_ts *ts = container_of(work, struct hx_ts, fw_work.work);
++	ktime_t start;
++	int ret;
++
++	guard(mutex)(&ts->lock);
++
++	if (!ts->enabled || ts->running)
++		return;
++
++	if (!ts->fw) {
++		ret = firmware_request_nowarn(&ts->fw, ts->fw_name, &ts->spi->dev);
++		if (ret) {
++			ts->fw = NULL;
++			/* The image may live on a filesystem that is not there yet */
++			hx_fw_retry(ts, "loading the firmware image", ret);
++			return;
++		}
++
++		ret = hx_fw_parse(ts);
++		if (ret) {
++			hx_fw_release(ts);
++			return;
++		}
++	}
++
++	if (!ts->chip) {
++		ret = hx_identify_chip(ts);
++		if (ret) {
++			hx_fw_retry(ts, "identifying the controller", ret);
++			return;
++		}
++		hx_log_fw_version(ts);
++	}
++
++	start = ktime_get();
++	ret = hx_download_firmware(ts);
++	if (ret) {
++		hx_fw_retry(ts, "firmware download", ret);
++		return;
++	}
++
++	dev_info(&ts->spi->dev, "firmware downloaded in %lld ms\n",
++		 ktime_ms_delta(ktime_get(), start));
++
++	ts->fw_tries = 0;
++	ts->ed_count = 0;
++	ts->running = true;
++	enable_irq(ts->spi->irq);
++
++	/*
++	 * The interrupt is edge triggered: if the controller raised it while
++	 * it was still disabled, read the pending report so the line rises.
++	 */
++	hx_read_event(ts, ts->scratch, HX_TOUCH_INFO_LEN);
++}
++
++static void hx_start(struct hx_ts *ts, unsigned int delay_ms)
++{
++	scoped_guard(mutex, &ts->lock) {
++		ts->enabled = true;
++		ts->fw_tries = 0;
++	}
++
++	schedule_delayed_work(&ts->fw_work, msecs_to_jiffies(delay_ms));
++}
++
++static void hx_stop(struct hx_ts *ts)
++{
++	bool was_running;
++
++	scoped_guard(mutex, &ts->lock) {
++		ts->enabled = false;
++		was_running = ts->running;
++		ts->running = false;
++		if (was_running)
++			disable_irq_nosync(ts->spi->irq);
++	}
++
++	cancel_delayed_work_sync(&ts->fw_work);
++
++	if (!was_running)
++		return;
++
++	/* Wait for a report that is being handled right now */
++	synchronize_irq(ts->spi->irq);
++
++	guard(mutex)(&ts->lock);
++	hx_release_fingers(ts);
++}
++
++/* ---------------------------------------------------------------------- */
++/* Touch reports                                                          */
++/* ---------------------------------------------------------------------- */
++
++static void hx_reload_firmware(struct hx_ts *ts)
++{
++	dev_warn(&ts->spi->dev, "controller reported an exception, reloading firmware\n");
++	ts->running = false;
++	disable_irq_nosync(ts->spi->irq);
++	hx_release_fingers(ts);
++	ts->fw_tries = 0;
++	ts->ed_count = 0;
++	schedule_delayed_work(&ts->fw_work, 0);
++}
++
++static bool hx_all_bytes(const u8 *data, size_t len, u8 val)
++{
++	size_t i;
++
++	for (i = 0; i < len; i++) {
++		if (data[i] != val)
++			return false;
++	}
++
++	return true;
++}
++
++/* A report with a bad checksum may be an exception event (vendor HX_EXCP_RECOVERY) */
++static void hx_check_exception(struct hx_ts *ts, const u8 *data)
++{
++	if (hx_all_bytes(data, HX_TOUCH_INFO_LEN, 0xeb) ||
++	    hx_all_bytes(data, HX_TOUCH_INFO_LEN, 0xec) ||
++	    hx_all_bytes(data, HX_TOUCH_INFO_LEN, 0xee)) {
++		hx_reload_firmware(ts);
++	} else if (hx_all_bytes(data, HX_TOUCH_INFO_LEN, 0xed)) {
++		/* Sent by the hardware after a reset of the touch MCU */
++		hx_reload_to_active(ts);
++		if (ts->ed_count++ > HX_EXCP_ED_COUNT)
++			hx_reload_firmware(ts);
++	} else {
++		ts->ed_count = 0;
++	}
++}
++
++static irqreturn_t hx_irq_thread(int irq, void *dev_id)
++{
++	struct hx_ts *ts = dev_id;
++	u8 *data = ts->scratch;
++	unsigned int i, points, raw_sel;
++	u8 checksum = 0;
++	int ret;
++
++	guard(mutex)(&ts->lock);
++
++	if (!ts->running)
++		return IRQ_HANDLED;
++
++	ret = hx_read_event(ts, data, HX_TOUCH_INFO_LEN);
++	if (ret) {
++		dev_err_ratelimited(&ts->spi->dev, "failed to read touch data: %d\n", ret);
++		return IRQ_HANDLED;
++	}
++
++	for (i = 0; i < HX_TOUCH_INFO_LEN; i++)
++		checksum += data[i];
++
++	if (checksum || hx_all_bytes(data, HX_TOUCH_INFO_LEN, 0x00)) {
++		hx_check_exception(ts, data);
++		return IRQ_HANDLED;
++	}
++	ts->ed_count = 0;
++
++	/* Diagnostic data is selected: drain the event stack and drop it */
++	raw_sel = data[HX_POINT_CNT_POS] >> 4;
++	if (raw_sel != 0x0f && raw_sel != 0x00) {
++		hx_read_event(ts, data, HX_EVENT_STACK_LEN - HX_TOUCH_INFO_LEN);
++		return IRQ_HANDLED;
++	}
++
++	points = data[HX_POINT_CNT_POS] == 0xff ? 0 : data[HX_POINT_CNT_POS] & 0x0f;
++
++	for (i = 0; points && i < HX_MAX_FINGERS; i++) {
++		unsigned int x = get_unaligned_be16(&data[i * 4]);
++		unsigned int y = get_unaligned_be16(&data[i * 4 + 2]);
++
++		/* Unused entries are 0xffff */
++		if (x >= HX_X_RES || y >= HX_Y_RES)
++			continue;
++
++		input_mt_slot(ts->input, i);
++		input_mt_report_slot_state(ts->input, MT_TOOL_FINGER, true);
++		touchscreen_report_pos(ts->input, &ts->prop, x, y, true);
++		input_report_abs(ts->input, ABS_MT_TOUCH_MAJOR, data[HX_COORD_LEN + i]);
++	}
++
++	input_mt_sync_frame(ts->input);
++	input_sync(ts->input);
++
++	return IRQ_HANDLED;
++}
++
++/* ---------------------------------------------------------------------- */
++/* Panel follower and power management                                    */
++/* ---------------------------------------------------------------------- */
++
++static int hx_panel_prepared(struct drm_panel_follower *follower)
++{
++	struct hx_ts *ts = container_of(follower, struct hx_ts, follower);
++
++	/* The panel reset wiped the touch firmware; load it once the panel is up */
++	hx_start(ts, HX_FW_PANEL_DELAY_MS);
++
++	return 0;
++}
++
++static int hx_panel_unpreparing(struct drm_panel_follower *follower)
++{
++	struct hx_ts *ts = container_of(follower, struct hx_ts, follower);
++
++	hx_stop(ts);
++
++	return 0;
++}
++
++static const struct drm_panel_follower_funcs hx_panel_follower_funcs = {
++	.panel_prepared = hx_panel_prepared,
++	.panel_unpreparing = hx_panel_unpreparing,
++};
++
++static int hx_suspend(struct device *dev)
++{
++	struct hx_ts *ts = dev_get_drvdata(dev);
++
++	if (!ts->is_follower)
++		hx_stop(ts);
++
++	return 0;
++}
++
++static int hx_resume(struct device *dev)
++{
++	struct hx_ts *ts = dev_get_drvdata(dev);
++
++	if (!ts->is_follower)
++		hx_start(ts, HX_FW_PANEL_DELAY_MS);
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(hx_pm_ops, hx_suspend, hx_resume);
++
++/* ---------------------------------------------------------------------- */
++/* Probe                                                                  */
++/* ---------------------------------------------------------------------- */
++
++static void hx_cleanup(void *data)
++{
++	struct hx_ts *ts = data;
++
++	hx_stop(ts);
++	hx_fw_release(ts);
++}
++
++/*
++ * The touch node is shared with the other controllers this tablet was built
++ * with; the bootloader names the fitted display (and with it the touch
++ * controller) on the command line: msm_drm.dsi_display0=qcom,mdss_dsi_<panel>_video.
++ * Returns the panel name ("hx83102e_txd_auo_video") or NULL if not a Himax one.
++ */
++static const char *hx_find_panel(size_t *len)
++{
++	static const char key[] = "mdss_dsi_hx83102";
++	const char *args, *s;
++
++	if (panel && *panel) {
++		*len = strlen(panel);
++		return strstr(panel, "hx83102") ? panel : NULL;
++	}
++
++	if (!of_chosen || of_property_read_string(of_chosen, "bootargs", &args))
++		return NULL;
++
++	s = strstr(args, key);
++	if (!s)
++		return NULL;
++
++	s += sizeof("mdss_dsi_") - 1;
++	*len = strcspn(s, ": ");
++
++	return s;
++}
++
++/* Same names, searched in the same order, as the vendor's himax_panel_info[] */
++static const char *hx_fw_name_for_panel(struct device *dev, const char *name, size_t len)
++{
++	static const char * const panels[] = {
++		"inx_fhd", "txd_inx", "hlt_auo", "txd_auo_al", "txd_auo",
++		"lide_hsd", "tianma_tianma", "djn_jdi",
++	};
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(panels); i++) {
++		if (strnstr(name, panels[i], len))
++			return devm_kasprintf(dev, GFP_KERNEL, "Himax_firmware_%s.bin",
++					      panels[i]);
++	}
++
++	dev_warn(dev, "unknown panel %.*s\n", (int)len, name);
++
++	return "Himax_firmware.bin";
++}
++
++static int hx_probe(struct spi_device *spi)
++{
++	struct device *dev = &spi->dev;
++	struct input_dev *input;
++	const char *panel_name;
++	size_t panel_len;
++	struct hx_ts *ts;
++	int ret;
++
++	/* Leave the hardware alone unless this tablet has a Himax panel */
++	panel_name = hx_find_panel(&panel_len);
++	if (!panel_name)
++		return -ENODEV;
++
++	ts = devm_kzalloc(dev, sizeof(*ts), GFP_KERNEL);
++	if (!ts)
++		return -ENOMEM;
++
++	ts->spi = spi;
++
++	if (!spi->irq)
++		return dev_err_probe(dev, -EINVAL, "no interrupt\n");
++
++	ts->tx_buf = devm_kmalloc(dev, HX_TX_BUF_LEN, GFP_KERNEL);
++	ts->rx_buf = devm_kmalloc(dev, HX_MAX_READ_LEN, GFP_KERNEL);
++	if (!ts->tx_buf || !ts->rx_buf)
++		return -ENOMEM;
++
++	ret = devm_mutex_init(dev, &ts->lock);
++	if (ret)
++		return ret;
++
++	INIT_DELAYED_WORK(&ts->fw_work, hx_fw_work);
++	spi_set_drvdata(spi, ts);
++
++	spi->mode = SPI_MODE_3;
++	spi->bits_per_word = 8;
++	ret = spi_setup(spi);
++	if (ret)
++		return dev_err_probe(dev, ret, "SPI setup failed\n");
++
++	ts->fw_name = hx_fw_name_for_panel(dev, panel_name, panel_len);
++	if (!ts->fw_name)
++		return -ENOMEM;
++
++	dev_info(dev, "panel %.*s, firmware %s\n", (int)panel_len, panel_name, ts->fw_name);
++
++	/* Deasserted: the controller is supposed to be running */
++	ts->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_LOW);
++	if (IS_ERR(ts->reset_gpio))
++		return dev_err_probe(dev, PTR_ERR(ts->reset_gpio),
++				     "failed to get reset GPIO\n");
++
++	input = devm_input_allocate_device(dev);
++	if (!input)
++		return -ENOMEM;
++
++	ts->input = input;
++	input->name = "Himax HX83102E Touchscreen";
++	input->id.bustype = BUS_SPI;
++
++	input_set_abs_params(input, ABS_MT_POSITION_X, 0, HX_X_RES - 1, 0, 0);
++	input_set_abs_params(input, ABS_MT_POSITION_Y, 0, HX_Y_RES - 1, 0, 0);
++	input_set_abs_params(input, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
++	touchscreen_parse_properties(input, true, &ts->prop);
++
++	ret = input_mt_init_slots(input, HX_MAX_FINGERS,
++				  INPUT_MT_DIRECT | INPUT_MT_DROP_UNUSED);
++	if (ret)
++		return ret;
++
++	/*
++	 * The vendor driver always uses a falling edge, whatever the DT says;
++	 * the node is shared with controllers that want a different trigger.
++	 */
++	ret = devm_request_threaded_irq(dev, spi->irq, NULL, hx_irq_thread,
++					IRQF_TRIGGER_FALLING | IRQF_ONESHOT |
++					IRQF_NO_AUTOEN,
++					dev_name(dev), ts);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to request interrupt\n");
++
++	ret = input_register_device(input);
++	if (ret)
++		return ret;
++
++	ret = devm_add_action_or_reset(dev, hx_cleanup, ts);
++	if (ret)
++		return ret;
++
++	ts->is_follower = drm_is_panel_follower(dev);
++	if (ts->is_follower) {
++		ts->follower.funcs = &hx_panel_follower_funcs;
++		ret = devm_drm_panel_add_follower(dev, &ts->follower);
++		if (ret)
++			return dev_err_probe(dev, ret, "failed to follow the panel\n");
++	} else {
++		dev_warn(dev, "no panel to follow, assuming the display is already on\n");
++		hx_start(ts, 0);
++	}
++
++	return 0;
++}
++
++static const struct of_device_id hx_of_match[] = {
++	{ .compatible = "himax,hx83102e-spi" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, hx_of_match);
++
++static const struct spi_device_id hx_spi_ids[] = {
++	{ "hx83102e-spi" },
++	{ }
++};
++MODULE_DEVICE_TABLE(spi, hx_spi_ids);
++
++static struct spi_driver hx_spi_driver = {
++	.driver = {
++		.name = "himax-hx83102e-spi",
++		.of_match_table = hx_of_match,
++		.pm = pm_sleep_ptr(&hx_pm_ops),
++	},
++	.probe = hx_probe,
++	.id_table = hx_spi_ids,
++};
++module_spi_driver(hx_spi_driver);
++
++MODULE_DESCRIPTION("Himax HX83102E SPI touchscreen driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/input/touchscreen/novatek-nt36523-spi.c b/drivers/input/touchscreen/novatek-nt36523-spi.c
+new file mode 100644
+index 000000000..54eea6d7e
+--- /dev/null
++++ b/drivers/input/touchscreen/novatek-nt36523-spi.c
+@@ -0,0 +1,1228 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Novatek NT36523 SPI touchscreen driver (TDDI, host firmware download)
++ *
++ * The touch controller shares its silicon with the display driver and has
++ * no flash of its own: the host has to load the touch firmware into the
++ * controller's RAM over SPI every time the panel has been reset.
++ *
++ * Protocol and register layout taken from the downstream "nt36xxx" driver,
++ * Copyright (C) 2010 - 2018 Novatek, Inc.
++ */
++
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/firmware.h>
++#include <linux/input.h>
++#include <linux/input/mt.h>
++#include <linux/input/touchscreen.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/pm.h>
++#include <linux/slab.h>
++#include <linux/spi/spi.h>
++#include <linux/unaligned.h>
++#include <linux/workqueue.h>
++
++#include <drm/drm_panel.h>
++
++#define NVT_SPI_WRITE_MASK		0x80
++#define NVT_SPI_READ_MASK		0x7f
++#define NVT_SPI_DUMMY_BYTES		1
++#define NVT_REG_PAGE			0xff
++
++/* Largest payload of a single firmware write, as used by the vendor */
++#define NVT_TRANSFER_LEN		(63 * 1024)
++#define NVT_XFER_BUF_LEN		(NVT_TRANSFER_LEN + 1 + NVT_SPI_DUMMY_BYTES)
++
++#define NVT_ENG_RST_ADDR		0x7fff80
++#define NVT_CHIP_VER_TRIM_ADDR		0x3f004
++#define NVT_ID_LEN			6
++
++/* Offsets inside the event buffer */
++#define NVT_EVENT_HOST_CMD		0x50
++#define NVT_EVENT_RESET_COMPLETE	0x60
++#define NVT_EVENT_FWINFO		0x78
++#define NVT_EVENT_PROJECTID		0x9a
++
++#define NVT_CMD_FW_CRC_ENABLE		0xae
++#define NVT_CMD_DEEP_SLEEP		0x11
++
++#define NVT_RESET_STATE_INIT		0xa0
++#define NVT_RESET_STATE_REK		0xa1
++#define NVT_RESET_STATE_MAX		0xaf
++
++#define NVT_MAX_FINGERS			10
++#define NVT_FINGER_LEN			6
++#define NVT_POINT_DATA_LEN		65
++#define NVT_MAX_PRESSURE		1000
++#define NVT_WDT_RECOVERY_COUNT		10
++
++#define NVT_FLASH_SECTOR_SIZE		4096
++#define NVT_FW_HEADER_MIN		0x30
++#define NVT_FW_ILM_DLM_NUM		2
++#define NVT_FW_MAX_PARTITIONS		64
++
++#define NVT_FW_LOAD_TRIES		20
++#define NVT_FW_RETRY_MS			3000
++#define NVT_FW_PANEL_DELAY_MS		100
++
++struct nvt_mem_map {
++	u32 event_buf_addr;
++	u32 boot_rdy_addr;
++	u32 tx_auto_copy_en;
++	u32 spi_dma_tx_info;
++	u32 ilm_length_addr;
++	u32 dlm_length_addr;
++	u32 ilm_des_addr;
++	u32 dlm_des_addr;
++	u32 g_ilm_checksum_addr;
++	u32 g_dlm_checksum_addr;
++	u32 r_ilm_checksum_addr;
++	u32 r_dlm_checksum_addr;
++	u32 bld_crc_en_addr;
++	u32 bld_ilm_dlm_crc_addr;
++};
++
++struct nvt_chip_data {
++	const char *name;
++	const struct nvt_mem_map *mmap;
++	u32 swrst_n8_addr;
++	u32 spi_rd_fast_addr;
++	/* Chip ID as read from NVT_CHIP_VER_TRIM_ADDR, compared where mask is set */
++	u8 id[NVT_ID_LEN];
++	u8 id_mask[NVT_ID_LEN];
++	unsigned int max_x;
++	unsigned int max_y;
++	const char *default_fw_name;
++};
++
++struct nvt_bin_map {
++	char name[12];
++	u32 bin_addr;
++	u32 sram_addr;
++	u32 size;
++	u32 crc;
++};
++
++struct nvt_ts {
++	struct spi_device *spi;
++	struct input_dev *input;
++	struct touchscreen_properties prop;
++	const struct nvt_chip_data *chip;
++
++	/* Serialises all SPI traffic and the firmware state below */
++	struct mutex lock;
++	u8 *tx_buf;
++	u8 *rx_buf;
++
++	struct drm_panel_follower follower;
++	bool is_follower;
++	struct delayed_work fw_work;
++
++	const char *fw_name;
++	const struct firmware *fw;
++	struct nvt_bin_map *bin_map;
++	unsigned int num_partitions;
++	bool fw_cascade;
++	unsigned int fw_tries;
++
++	bool chip_identified;
++	/* The panel is up and the controller is supposed to be working */
++	bool enabled;
++	/* Firmware is loaded and the interrupt is enabled */
++	bool running;
++	unsigned int wdt_count;
++
++	u8 scratch[NVT_POINT_DATA_LEN];
++	u8 fw_ver;
++	u16 fw_max_x;
++	u16 fw_max_y;
++};
++
++/* ---------------------------------------------------------------------- */
++/* SPI access                                                             */
++/* ---------------------------------------------------------------------- */
++
++static int nvt_spi_write(struct nvt_ts *ts, u8 reg, const u8 *data, size_t len)
++{
++	struct spi_transfer xfer = {
++		.tx_buf = ts->tx_buf,
++		.len = len + 1,
++	};
++
++	if (len > NVT_TRANSFER_LEN)
++		return -EINVAL;
++
++	ts->tx_buf[0] = reg | NVT_SPI_WRITE_MASK;
++	memcpy(&ts->tx_buf[1], data, len);
++
++	return spi_sync_transfer(ts->spi, &xfer, 1);
++}
++
++static int nvt_spi_read(struct nvt_ts *ts, u8 reg, u8 *data, size_t len)
++{
++	struct spi_transfer xfer = {
++		.tx_buf = ts->tx_buf,
++		.rx_buf = ts->rx_buf,
++		.len = len + 1 + NVT_SPI_DUMMY_BYTES,
++	};
++	int ret;
++
++	if (len > NVT_TRANSFER_LEN)
++		return -EINVAL;
++
++	memset(ts->tx_buf, 0, xfer.len);
++	ts->tx_buf[0] = reg & NVT_SPI_READ_MASK;
++
++	ret = spi_sync_transfer(ts->spi, &xfer, 1);
++	if (ret)
++		return ret;
++
++	memcpy(data, &ts->rx_buf[1 + NVT_SPI_DUMMY_BYTES], len);
++
++	return 0;
++}
++
++static int nvt_set_page(struct nvt_ts *ts, u32 addr)
++{
++	u8 buf[2] = { (addr >> 15) & 0xff, (addr >> 7) & 0xff };
++
++	return nvt_spi_write(ts, NVT_REG_PAGE, buf, sizeof(buf));
++}
++
++static int nvt_write_addr(struct nvt_ts *ts, u32 addr, const u8 *data, size_t len)
++{
++	int ret;
++
++	ret = nvt_set_page(ts, addr);
++	if (ret)
++		return ret;
++
++	return nvt_spi_write(ts, addr & 0x7f, data, len);
++}
++
++static int nvt_write_addr_u8(struct nvt_ts *ts, u32 addr, u8 val)
++{
++	return nvt_write_addr(ts, addr, &val, 1);
++}
++
++static int nvt_read_addr(struct nvt_ts *ts, u32 addr, u8 *data, size_t len)
++{
++	int ret;
++
++	ret = nvt_set_page(ts, addr);
++	if (ret)
++		return ret;
++
++	return nvt_spi_read(ts, addr & 0x7f, data, len);
++}
++
++/* ---------------------------------------------------------------------- */
++/* Controller state                                                       */
++/* ---------------------------------------------------------------------- */
++
++static void nvt_eng_reset(struct nvt_ts *ts)
++{
++	nvt_write_addr_u8(ts, NVT_ENG_RST_ADDR, 0x5a);
++	usleep_range(1000, 2000);
++}
++
++/* Reset the touch MCU and leave it waiting in the boot loader */
++static int nvt_bootloader_reset(struct nvt_ts *ts)
++{
++	int ret;
++
++	ret = nvt_write_addr_u8(ts, ts->chip->swrst_n8_addr, 0x69);
++	if (ret)
++		return ret;
++
++	usleep_range(5000, 6000);
++
++	if (ts->chip->spi_rd_fast_addr)
++		ret = nvt_write_addr_u8(ts, ts->chip->spi_rd_fast_addr, 0x00);
++
++	return ret;
++}
++
++static int nvt_identify_chip(struct nvt_ts *ts)
++{
++	const struct nvt_chip_data *chip = ts->chip;
++	u8 id[NVT_ID_LEN] = { };
++	int retry, i, ret;
++
++	nvt_eng_reset(ts);
++	msleep(10);
++
++	for (retry = 0; retry < 5; retry++) {
++		ret = nvt_bootloader_reset(ts);
++		if (!ret)
++			ret = nvt_read_addr(ts, NVT_CHIP_VER_TRIM_ADDR, id, sizeof(id));
++		if (ret) {
++			dev_err(&ts->spi->dev, "chip ID read failed: %d\n", ret);
++			msleep(10);
++			continue;
++		}
++
++		for (i = 0; i < NVT_ID_LEN; i++) {
++			if (chip->id_mask[i] && id[i] != chip->id[i])
++				break;
++		}
++		if (i == NVT_ID_LEN) {
++			dev_info(&ts->spi->dev, "found %s, chip ID %*ph\n",
++				 chip->name, NVT_ID_LEN, id);
++			return 0;
++		}
++
++		msleep(10);
++	}
++
++	dev_err(&ts->spi->dev, "unexpected chip ID %*ph (wanted %*ph)\n",
++		NVT_ID_LEN, id, NVT_ID_LEN, chip->id);
++
++	return ret ?: -ENODEV;
++}
++
++static int nvt_check_fw_reset_state(struct nvt_ts *ts, u8 state)
++{
++	u32 addr = ts->chip->mmap->event_buf_addr | NVT_EVENT_RESET_COMPLETE;
++	int retries = state == NVT_RESET_STATE_INIT ? 10 : 50;
++	u8 buf[5] = { };
++	int ret;
++
++	do {
++		ret = nvt_read_addr(ts, addr, buf, sizeof(buf));
++		if (ret)
++			return ret;
++
++		if (buf[0] >= state && buf[0] <= NVT_RESET_STATE_MAX)
++			return 0;
++
++		usleep_range(10000, 11000);
++	} while (retries--);
++
++	dev_err(&ts->spi->dev, "firmware did not start, reset state %*ph\n",
++		(int)sizeof(buf), buf);
++
++	return -ETIMEDOUT;
++}
++
++static int nvt_get_fw_info(struct nvt_ts *ts)
++{
++	const struct nvt_mem_map *mmap = ts->chip->mmap;
++	u8 buf[38];
++	u8 pid[2] = { };
++	int retry, ret;
++
++	for (retry = 0; retry < 4; retry++) {
++		ret = nvt_read_addr(ts, mmap->event_buf_addr | NVT_EVENT_FWINFO,
++				    buf, sizeof(buf));
++		if (ret)
++			return ret;
++
++		/* Version byte is followed by its complement */
++		if ((u8)(buf[0] + buf[1]) == 0xff)
++			break;
++
++		ret = -EIO;
++	}
++
++	if (ret) {
++		dev_warn(&ts->spi->dev, "firmware info is broken (%02x %02x)\n",
++			 buf[0], buf[1]);
++		ts->fw_ver = 0;
++		ts->fw_max_x = ts->chip->max_x;
++		ts->fw_max_y = ts->chip->max_y;
++	} else {
++		ts->fw_ver = buf[0];
++		ts->fw_max_x = get_unaligned_be16(&buf[4]);
++		ts->fw_max_y = get_unaligned_be16(&buf[6]);
++		if (!ts->fw_max_x || !ts->fw_max_y) {
++			ts->fw_max_x = ts->chip->max_x;
++			ts->fw_max_y = ts->chip->max_y;
++		}
++	}
++
++	nvt_read_addr(ts, mmap->event_buf_addr | NVT_EVENT_PROJECTID, pid, sizeof(pid));
++
++	dev_info(&ts->spi->dev,
++		 "firmware version 0x%02x, type 0x%02x, PID %04x, %ux%u sensors, resolution %ux%u\n",
++		 ts->fw_ver, buf[13], get_unaligned_le16(pid), buf[2], buf[3],
++		 ts->fw_max_x, ts->fw_max_y);
++
++	return ret;
++}
++
++/* ---------------------------------------------------------------------- */
++/* Firmware image parsing                                                 */
++/* ---------------------------------------------------------------------- */
++
++static int nvt_fw_need_write_size(const struct firmware *fw, size_t *size)
++{
++	size_t i;
++
++	for (i = fw->size / NVT_FLASH_SECTOR_SIZE; i > 0; i--) {
++		const u8 *flag = &fw->data[i * NVT_FLASH_SECTOR_SIZE - 3];
++
++		if (!memcmp(flag, "NVT", 3) || !memcmp(flag, "MOD", 3)) {
++			*size = i * NVT_FLASH_SECTOR_SIZE;
++			return 0;
++		}
++	}
++
++	return -EINVAL;
++}
++
++static int nvt_fw_read_entry(struct nvt_ts *ts, struct nvt_bin_map *map, u32 pos)
++{
++	const struct firmware *fw = ts->fw;
++
++	if (pos > fw->size || fw->size - pos < 16)
++		return -EINVAL;
++
++	map->sram_addr = get_unaligned_le32(&fw->data[pos]);
++	map->size = get_unaligned_le32(&fw->data[pos + 4]);
++	map->bin_addr = get_unaligned_le32(&fw->data[pos + 8]);
++	map->crc = get_unaligned_le32(&fw->data[pos + 12]);
++
++	return 0;
++}
++
++static int nvt_fw_parse(struct nvt_ts *ts)
++{
++	const struct firmware *fw = ts->fw;
++	const u8 *data = fw->data;
++	struct nvt_bin_map *map;
++	unsigned int info_sec_num = 0, ovly_sec_num, partitions, i;
++	bool found_header = false;
++	size_t need_size;
++	u32 end, pos;
++	int ret;
++
++	if (fw->size < NVT_FLASH_SECTOR_SIZE)
++		return -EINVAL;
++
++	if (nvt_fw_need_write_size(fw, &need_size)) {
++		dev_err(&ts->spi->dev, "firmware end flag not found\n");
++		return -EINVAL;
++	}
++
++	/* Version byte and its complement live at the start of the last sector */
++	pos = need_size - NVT_FLASH_SECTOR_SIZE;
++	if ((u8)(data[pos] + data[pos + 1]) != 0xff) {
++		dev_err(&ts->spi->dev, "firmware version check failed (%02x %02x)\n",
++			data[pos], data[pos + 1]);
++		return -ENOEXEC;
++	}
++
++	end = get_unaligned_le32(&data[0]);
++	if (end < NVT_FW_HEADER_MIN || end > fw->size) {
++		dev_err(&ts->spi->dev, "bad firmware header size 0x%x\n", end);
++		return -EINVAL;
++	}
++
++	ts->fw_cascade = data[0x20] & BIT(1);
++
++	if (ts->fw_cascade) {
++		for (pos = 0x30; pos < end / 2; pos += 0x10)
++			info_sec_num++;
++		/* next header section */
++		info_sec_num++;
++	} else {
++		for (pos = 0x30; pos < end; pos += 0x10)
++			info_sec_num++;
++	}
++
++	ovly_sec_num = (data[0x28] & BIT(4)) ? data[0x28] & 0x0f : 0;
++
++	partitions = NVT_FW_ILM_DLM_NUM + ovly_sec_num + info_sec_num;
++	if (partitions > NVT_FW_MAX_PARTITIONS) {
++		dev_err(&ts->spi->dev, "too many firmware partitions (%u)\n", partitions);
++		return -EINVAL;
++	}
++
++	map = kcalloc(partitions, sizeof(*map), GFP_KERNEL);
++	if (!map)
++		return -ENOMEM;
++
++	pos = 0;
++	for (i = 0; i < partitions; i++) {
++		if (i < NVT_FW_ILM_DLM_NUM) {
++			/* ILM and DLM: BIN address, SRAM address, size */
++			map[i].bin_addr = get_unaligned_le32(&data[i * 12]);
++			map[i].sram_addr = get_unaligned_le32(&data[4 + i * 12]);
++			map[i].size = get_unaligned_le32(&data[8 + i * 12]);
++			map[i].crc = get_unaligned_le32(&data[0x18 + i * 4]);
++			strscpy(map[i].name, i ? "DLM" : "ILM");
++		} else if (i < NVT_FW_ILM_DLM_NUM + info_sec_num) {
++			/* Info sections: SRAM address, size, BIN address, CRC */
++			if (!found_header)
++				pos = 0x30 + 0x10 * (i - NVT_FW_ILM_DLM_NUM);
++			else if (ts->fw_cascade)
++				pos = end - 0x10;
++
++			ret = nvt_fw_read_entry(ts, &map[i], pos);
++			if (ret)
++				goto err_free;
++
++			if (map[i].bin_addr < end && map[i].size) {
++				strscpy(map[i].name, "Header");
++				found_header = true;
++			} else {
++				snprintf(map[i].name, sizeof(map[i].name), "Info-%u",
++					 i - NVT_FW_ILM_DLM_NUM);
++			}
++		} else {
++			/* Overlay sections are described at the start of the DLM */
++			unsigned int n = i - NVT_FW_ILM_DLM_NUM - info_sec_num;
++
++			ret = nvt_fw_read_entry(ts, &map[i], map[1].bin_addr + 0x10 * n);
++			if (ret)
++				goto err_free;
++
++			snprintf(map[i].name, sizeof(map[i].name), "Overlay-%u", n);
++		}
++
++		if (map[i].bin_addr > fw->size ||
++		    map[i].size > fw->size - map[i].bin_addr) {
++			dev_err(&ts->spi->dev,
++				"firmware partition %s (0x%x + 0x%x) is outside of the image\n",
++				map[i].name, map[i].bin_addr, map[i].size);
++			ret = -EINVAL;
++			goto err_free;
++		}
++
++		dev_dbg(&ts->spi->dev, "[%u] %s: SRAM 0x%08x size 0x%08x BIN 0x%08x CRC 0x%08x\n",
++			i, map[i].name, map[i].sram_addr, map[i].size,
++			map[i].bin_addr, map[i].crc);
++	}
++
++	ts->bin_map = map;
++	ts->num_partitions = partitions;
++
++	dev_info(&ts->spi->dev, "firmware %s: version 0x%02x, %u partitions%s\n",
++		 ts->fw_name, data[need_size - NVT_FLASH_SECTOR_SIZE], partitions,
++		 ts->fw_cascade ? ", cascade" : "");
++
++	return 0;
++
++err_free:
++	kfree(map);
++	dev_err(&ts->spi->dev, "failed to parse firmware header: %d\n", ret);
++	return ret;
++}
++
++static void nvt_fw_release(struct nvt_ts *ts)
++{
++	kfree(ts->bin_map);
++	ts->bin_map = NULL;
++	ts->num_partitions = 0;
++	release_firmware(ts->fw);
++	ts->fw = NULL;
++}
++
++/* ---------------------------------------------------------------------- */
++/* Firmware download                                                      */
++/* ---------------------------------------------------------------------- */
++
++static int nvt_write_sram(struct nvt_ts *ts, u32 sram_addr, u32 bin_addr, u32 size)
++{
++	const struct firmware *fw = ts->fw;
++	int ret;
++
++	while (size) {
++		u32 len = min_t(u32, size, NVT_TRANSFER_LEN);
++		u32 avail = min_t(u32, len, fw->size - bin_addr);
++
++		ret = nvt_set_page(ts, sram_addr);
++		if (ret)
++			return ret;
++
++		ts->tx_buf[0] = (sram_addr & 0x7f) | NVT_SPI_WRITE_MASK;
++		memcpy(&ts->tx_buf[1], &fw->data[bin_addr], avail);
++		/* The vendor writes one byte past each partition; pad with zero */
++		memset(&ts->tx_buf[1 + avail], 0, len - avail);
++
++		ret = spi_write(ts->spi, ts->tx_buf, len + 1);
++		if (ret)
++			return ret;
++
++		sram_addr += len;
++		bin_addr += avail;
++		size -= len;
++	}
++
++	return 0;
++}
++
++static int nvt_write_firmware(struct nvt_ts *ts)
++{
++	unsigned int i;
++	int ret;
++
++	for (i = 0; i < ts->num_partitions; i++) {
++		const struct nvt_bin_map *map = &ts->bin_map[i];
++
++		/* Reserved partitions have no size */
++		if (!map->size)
++			continue;
++
++		ret = nvt_write_sram(ts, map->sram_addr, map->bin_addr, map->size + 1);
++		if (ret) {
++			dev_err(&ts->spi->dev, "writing %s failed: %d\n", map->name, ret);
++			return ret;
++		}
++	}
++
++	return 0;
++}
++
++static int nvt_set_bld_crc_bank(struct nvt_ts *ts, u32 des_addr, u32 length_addr,
++				u32 checksum_addr, const struct nvt_bin_map *map)
++{
++	u8 buf[4];
++	int ret;
++
++	/* All three registers share one page */
++	put_unaligned_le24(map->sram_addr, buf);
++	ret = nvt_write_addr(ts, des_addr, buf, 3);
++	if (ret)
++		return ret;
++
++	buf[0] = map->size & 0xff;
++	buf[1] = (map->size >> 8) & 0xff;
++	buf[2] = (map->size >> 16) & 0x01;
++	ret = nvt_spi_write(ts, length_addr & 0x7f, buf, 3);
++	if (ret)
++		return ret;
++
++	put_unaligned_le32(map->crc, buf);
++
++	return nvt_spi_write(ts, checksum_addr & 0x7f, buf, 4);
++}
++
++static int nvt_set_bld_hw_crc(struct nvt_ts *ts)
++{
++	const struct nvt_mem_map *mmap = ts->chip->mmap;
++	int ret;
++
++	ret = nvt_set_bld_crc_bank(ts, mmap->ilm_des_addr, mmap->ilm_length_addr,
++				   mmap->g_ilm_checksum_addr, &ts->bin_map[0]);
++	if (ret)
++		return ret;
++
++	return nvt_set_bld_crc_bank(ts, mmap->dlm_des_addr, mmap->dlm_length_addr,
++				    mmap->g_dlm_checksum_addr, &ts->bin_map[1]);
++}
++
++static int nvt_wait_spi_dma_tx(struct nvt_ts *ts)
++{
++	int retries = 200;
++	u8 val;
++	int ret;
++
++	while (retries--) {
++		ret = nvt_read_addr(ts, ts->chip->mmap->spi_dma_tx_info, &val, 1);
++		if (ret)
++			return ret;
++		if (!val)
++			return 0;
++
++		usleep_range(1000, 1100);
++	}
++
++	return -ETIMEDOUT;
++}
++
++static void nvt_dump_bld_crc(struct nvt_ts *ts)
++{
++	const struct nvt_mem_map *mmap = ts->chip->mmap;
++	u8 flag = 0, g[4] = { }, r[4] = { };
++
++	nvt_read_addr(ts, mmap->bld_ilm_dlm_crc_addr, &flag, 1);
++	dev_err(&ts->spi->dev, "crc_done %u, ilm_crc_flag %u, dlm_crc_flag %u\n",
++		(flag >> 2) & 1, flag & 1, (flag >> 1) & 1);
++
++	nvt_read_addr(ts, mmap->g_ilm_checksum_addr, g, sizeof(g));
++	nvt_read_addr(ts, mmap->r_ilm_checksum_addr, r, sizeof(r));
++	dev_err(&ts->spi->dev, "ILM: image crc %08x, golden %08x, result %08x\n",
++		ts->bin_map[0].crc, get_unaligned_le32(g), get_unaligned_le32(r));
++
++	nvt_read_addr(ts, mmap->g_dlm_checksum_addr, g, sizeof(g));
++	nvt_read_addr(ts, mmap->r_dlm_checksum_addr, r, sizeof(r));
++	dev_err(&ts->spi->dev, "DLM: image crc %08x, golden %08x, result %08x\n",
++		ts->bin_map[1].crc, get_unaligned_le32(g), get_unaligned_le32(r));
++}
++
++static int nvt_download_firmware_once(struct nvt_ts *ts)
++{
++	const struct nvt_mem_map *mmap = ts->chip->mmap;
++	u8 val;
++	int ret;
++
++	ret = nvt_bootloader_reset(ts);
++	if (ret)
++		return ret;
++
++	ret = nvt_set_bld_hw_crc(ts);
++	if (ret)
++		return ret;
++
++	if (ts->fw_cascade) {
++		ret = nvt_write_addr_u8(ts, mmap->tx_auto_copy_en, 0x69);
++		if (ret)
++			return ret;
++	}
++
++	ret = nvt_write_firmware(ts);
++	if (ret)
++		return ret;
++
++	if (ts->fw_cascade) {
++		ret = nvt_wait_spi_dma_tx(ts);
++		if (ret) {
++			dev_err(&ts->spi->dev, "SPI DMA TX did not finish: %d\n", ret);
++			return ret;
++		}
++	}
++
++	/* Enable the boot loader CRC check */
++	ret = nvt_read_addr(ts, mmap->bld_crc_en_addr, &val, 1);
++	if (ret)
++		return ret;
++	val |= BIT(7);
++	ret = nvt_spi_write(ts, mmap->bld_crc_en_addr & 0x7f, &val, 1);
++	if (ret)
++		return ret;
++
++	/* Clear the reset status and enable the firmware CRC check */
++	ret = nvt_write_addr_u8(ts, mmap->event_buf_addr | NVT_EVENT_RESET_COMPLETE, 0x00);
++	if (ret)
++		return ret;
++	val = NVT_CMD_FW_CRC_ENABLE;
++	ret = nvt_spi_write(ts, NVT_EVENT_HOST_CMD, &val, 1);
++	if (ret)
++		return ret;
++
++	/* Let the firmware run */
++	ret = nvt_write_addr_u8(ts, mmap->boot_rdy_addr, 1);
++	if (ret)
++		return ret;
++	usleep_range(5000, 6000);
++
++	return nvt_check_fw_reset_state(ts, NVT_RESET_STATE_INIT);
++}
++
++static int nvt_download_firmware(struct nvt_ts *ts)
++{
++	int retry, ret;
++
++	for (retry = 0; retry < 3; retry++) {
++		ret = nvt_download_firmware_once(ts);
++		if (!ret)
++			return 0;
++
++		dev_warn(&ts->spi->dev, "firmware download attempt %d failed: %d\n",
++			 retry + 1, ret);
++	}
++
++	nvt_dump_bld_crc(ts);
++
++	return ret;
++}
++
++/* ---------------------------------------------------------------------- */
++/* Start / stop                                                           */
++/* ---------------------------------------------------------------------- */
++
++static void nvt_release_fingers(struct nvt_ts *ts)
++{
++	input_mt_sync_frame(ts->input);
++	input_sync(ts->input);
++}
++
++static void nvt_fw_retry(struct nvt_ts *ts, const char *what, int err)
++{
++	if (++ts->fw_tries >= NVT_FW_LOAD_TRIES) {
++		dev_err(&ts->spi->dev, "%s failed (%d), giving up\n", what, err);
++		return;
++	}
++
++	if (ts->fw_tries == 1)
++		dev_warn(&ts->spi->dev, "%s failed (%d), will retry\n", what, err);
++
++	schedule_delayed_work(&ts->fw_work, msecs_to_jiffies(NVT_FW_RETRY_MS));
++}
++
++static void nvt_fw_work(struct work_struct *work)
++{
++	struct nvt_ts *ts = container_of(work, struct nvt_ts, fw_work.work);
++	ktime_t start;
++	int ret;
++
++	guard(mutex)(&ts->lock);
++
++	if (!ts->enabled || ts->running)
++		return;
++
++	if (!ts->fw) {
++		ret = firmware_request_nowarn(&ts->fw, ts->fw_name, &ts->spi->dev);
++		if (ret) {
++			ts->fw = NULL;
++			/* The image may live on a filesystem that is not there yet */
++			nvt_fw_retry(ts, "loading the firmware image", ret);
++			return;
++		}
++
++		ret = nvt_fw_parse(ts);
++		if (ret) {
++			nvt_fw_release(ts);
++			return;
++		}
++	}
++
++	if (!ts->chip_identified) {
++		ret = nvt_identify_chip(ts);
++		if (ret) {
++			nvt_fw_retry(ts, "identifying the controller", ret);
++			return;
++		}
++		ts->chip_identified = true;
++	}
++
++	start = ktime_get();
++	ret = nvt_download_firmware(ts);
++	if (ret) {
++		nvt_fw_retry(ts, "firmware download", ret);
++		return;
++	}
++
++	dev_info(&ts->spi->dev, "firmware downloaded in %lld ms\n",
++		 ktime_ms_delta(ktime_get(), start));
++
++	/* Give the firmware time to calibrate its baseline; not fatal */
++	nvt_check_fw_reset_state(ts, NVT_RESET_STATE_REK);
++
++	nvt_get_fw_info(ts);
++	if (ts->fw_max_x != ts->prop.max_x + 1 || ts->fw_max_y != ts->prop.max_y + 1)
++		dev_warn(&ts->spi->dev,
++			 "firmware resolution %ux%u differs from the configured %ux%u\n",
++			 ts->fw_max_x, ts->fw_max_y, ts->prop.max_x + 1, ts->prop.max_y + 1);
++
++	/* Touch reports are read from the start of the event buffer */
++	ret = nvt_set_page(ts, ts->chip->mmap->event_buf_addr);
++	if (ret) {
++		nvt_fw_retry(ts, "selecting the event buffer", ret);
++		return;
++	}
++
++	ts->fw_tries = 0;
++	ts->wdt_count = 0;
++	ts->running = true;
++	enable_irq(ts->spi->irq);
++
++	/*
++	 * The interrupt is edge triggered: if the controller raised it while
++	 * it was still disabled, read the pending report so the line drops.
++	 */
++	nvt_spi_read(ts, 0x00, ts->scratch, sizeof(ts->scratch));
++}
++
++static void nvt_start(struct nvt_ts *ts, unsigned int delay_ms)
++{
++	scoped_guard(mutex, &ts->lock) {
++		ts->enabled = true;
++		ts->fw_tries = 0;
++	}
++
++	schedule_delayed_work(&ts->fw_work, msecs_to_jiffies(delay_ms));
++}
++
++static void nvt_stop(struct nvt_ts *ts)
++{
++	u8 cmd = NVT_CMD_DEEP_SLEEP;
++	bool was_running;
++
++	scoped_guard(mutex, &ts->lock) {
++		ts->enabled = false;
++		was_running = ts->running;
++		ts->running = false;
++		if (was_running)
++			disable_irq_nosync(ts->spi->irq);
++	}
++
++	cancel_delayed_work_sync(&ts->fw_work);
++
++	if (!was_running)
++		return;
++
++	/* Wait for a report that is being handled right now */
++	synchronize_irq(ts->spi->irq);
++
++	guard(mutex)(&ts->lock);
++	nvt_spi_write(ts, NVT_EVENT_HOST_CMD, &cmd, 1);
++	msleep(20);
++	nvt_release_fingers(ts);
++}
++
++/* ---------------------------------------------------------------------- */
++/* Touch reports                                                          */
++/* ---------------------------------------------------------------------- */
++
++static bool nvt_is_pattern(const u8 *data, u8 a, u8 b)
++{
++	int i;
++
++	for (i = 0; i < 6; i++) {
++		if (data[i] != a && data[i] != b)
++			return false;
++	}
++
++	return true;
++}
++
++static irqreturn_t nvt_irq_thread(int irq, void *dev_id)
++{
++	struct nvt_ts *ts = dev_id;
++	u8 data[NVT_POINT_DATA_LEN];
++	u8 checksum = 0;
++	int i, ret;
++
++	guard(mutex)(&ts->lock);
++
++	if (!ts->running)
++		return IRQ_HANDLED;
++
++	ret = nvt_spi_read(ts, 0x00, data, sizeof(data));
++	if (ret) {
++		dev_err_ratelimited(&ts->spi->dev, "failed to read touch data: %d\n", ret);
++		return IRQ_HANDLED;
++	}
++
++	/* The controller lost its firmware (ESD, watchdog): load it again */
++	if (nvt_is_pattern(data, 0xfd, 0xfe)) {
++		if (++ts->wdt_count > NVT_WDT_RECOVERY_COUNT) {
++			dev_warn(&ts->spi->dev, "controller was reset, reloading firmware\n");
++			ts->running = false;
++			disable_irq_nosync(irq);
++			nvt_release_fingers(ts);
++			ts->fw_tries = 0;
++			schedule_delayed_work(&ts->fw_work, 0);
++		}
++		return IRQ_HANDLED;
++	}
++	ts->wdt_count = 0;
++
++	/* Firmware is busy recovering */
++	if (nvt_is_pattern(data, 0x77, 0x77))
++		return IRQ_HANDLED;
++
++	for (i = 0; i < NVT_POINT_DATA_LEN - 1; i++)
++		checksum += data[i];
++	checksum = ~checksum + 1;
++	if (checksum != data[NVT_POINT_DATA_LEN - 1]) {
++		dev_dbg_ratelimited(&ts->spi->dev, "touch data checksum mismatch\n");
++		return IRQ_HANDLED;
++	}
++
++	for (i = 0; i < NVT_MAX_FINGERS; i++) {
++		const u8 *p = &data[i * NVT_FINGER_LEN];
++		unsigned int id = p[0] >> 3;
++		unsigned int status = p[0] & 0x07;
++		unsigned int x, y, major, pressure;
++
++		if (!id || id > NVT_MAX_FINGERS)
++			continue;
++
++		/* 1: finger down, 2: finger moving */
++		if (status != 0x01 && status != 0x02)
++			continue;
++
++		x = (p[1] << 4) | (p[3] >> 4);
++		y = (p[2] << 4) | (p[3] & 0x0f);
++		if (x > ts->fw_max_x || y > ts->fw_max_y)
++			continue;
++		x = min(x, ts->fw_max_x - 1U);
++		y = min(y, ts->fw_max_y - 1U);
++
++		major = p[4] ?: 1;
++
++		pressure = p[5];
++		if (i < 2)
++			pressure |= data[62 + i] << 8;
++		pressure = clamp(pressure, 1U, NVT_MAX_PRESSURE);
++
++		input_mt_slot(ts->input, id - 1);
++		input_mt_report_slot_state(ts->input, MT_TOOL_FINGER, true);
++		touchscreen_report_pos(ts->input, &ts->prop, x, y, true);
++		input_report_abs(ts->input, ABS_MT_TOUCH_MAJOR, major);
++		input_report_abs(ts->input, ABS_MT_PRESSURE, pressure);
++	}
++
++	input_mt_sync_frame(ts->input);
++	input_sync(ts->input);
++
++	return IRQ_HANDLED;
++}
++
++/* ---------------------------------------------------------------------- */
++/* Panel follower and power management                                    */
++/* ---------------------------------------------------------------------- */
++
++static int nvt_panel_prepared(struct drm_panel_follower *follower)
++{
++	struct nvt_ts *ts = container_of(follower, struct nvt_ts, follower);
++
++	/* The panel reset wiped the touch firmware; load it once the panel is up */
++	nvt_start(ts, NVT_FW_PANEL_DELAY_MS);
++
++	return 0;
++}
++
++static int nvt_panel_unpreparing(struct drm_panel_follower *follower)
++{
++	struct nvt_ts *ts = container_of(follower, struct nvt_ts, follower);
++
++	nvt_stop(ts);
++
++	return 0;
++}
++
++static const struct drm_panel_follower_funcs nvt_panel_follower_funcs = {
++	.panel_prepared = nvt_panel_prepared,
++	.panel_unpreparing = nvt_panel_unpreparing,
++};
++
++static int nvt_suspend(struct device *dev)
++{
++	struct nvt_ts *ts = dev_get_drvdata(dev);
++
++	if (!ts->is_follower)
++		nvt_stop(ts);
++
++	return 0;
++}
++
++static int nvt_resume(struct device *dev)
++{
++	struct nvt_ts *ts = dev_get_drvdata(dev);
++
++	if (!ts->is_follower)
++		nvt_start(ts, NVT_FW_PANEL_DELAY_MS);
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(nvt_pm_ops, nvt_suspend, nvt_resume);
++
++/* ---------------------------------------------------------------------- */
++/* Probe                                                                  */
++/* ---------------------------------------------------------------------- */
++
++static void nvt_cleanup(void *data)
++{
++	struct nvt_ts *ts = data;
++
++	nvt_stop(ts);
++	nvt_fw_release(ts);
++}
++
++/*
++ * Tablets built with different panels need different touch firmware, and the
++ * vendor names the files after the panel. Where the bootloader names the
++ * fitted panel on the command line (msm_drm.dsi_display0=...nt36523_<panel>_video)
++ * and the configured file follows that naming, load the file of that panel.
++ */
++static const char *nvt_fw_name_for_panel(struct device *dev, const char *name)
++{
++	static const char key[] = "mdss_dsi_nt36523_";
++	static const char prefix[] = "novatek_ts_fw_";
++	const char *args, *s, *e, *fw;
++
++	if (!name || strncmp(name, prefix, sizeof(prefix) - 1))
++		return name;
++
++	if (!of_chosen || of_property_read_string(of_chosen, "bootargs", &args))
++		return name;
++
++	s = strstr(args, key);
++	if (!s)
++		return name;
++
++	s += sizeof(key) - 1;
++	e = strstr(s, "_video");
++	if (!e || e == s || e - s > 32 || memchr(s, ' ', e - s))
++		return name;
++
++	fw = devm_kasprintf(dev, GFP_KERNEL, "%s%.*s.bin", prefix, (int)(e - s), s);
++
++	return fw ?: name;
++}
++
++/*
++ * The touch node of these tablets is shared by the drivers of every touch
++ * controller fitted to the different panel variants. When the bootloader
++ * names a panel of another controller family, leave the device to its driver.
++ */
++static bool nvt_other_panel(void)
++{
++	static const char key[] = "dsi_display0=qcom,mdss_dsi_";
++	const char *args, *s;
++
++	if (!of_chosen || of_property_read_string(of_chosen, "bootargs", &args))
++		return false;
++
++	s = strstr(args, key);
++	if (!s)
++		return false;
++
++	return strncmp(s + sizeof(key) - 1, "nt36523_", 8) != 0;
++}
++
++static int nvt_probe(struct spi_device *spi)
++{
++	struct device *dev = &spi->dev;
++	struct input_dev *input;
++	struct nvt_ts *ts;
++	int ret;
++
++	if (nvt_other_panel())
++		return -ENODEV;
++
++	ts = devm_kzalloc(dev, sizeof(*ts), GFP_KERNEL);
++	if (!ts)
++		return -ENOMEM;
++
++	ts->spi = spi;
++	ts->chip = spi_get_device_match_data(spi);
++	if (!ts->chip)
++		return -ENODEV;
++
++	if (!spi->irq)
++		return dev_err_probe(dev, -EINVAL, "no interrupt\n");
++
++	ts->tx_buf = devm_kmalloc(dev, NVT_XFER_BUF_LEN, GFP_KERNEL);
++	ts->rx_buf = devm_kmalloc(dev, NVT_XFER_BUF_LEN, GFP_KERNEL);
++	if (!ts->tx_buf || !ts->rx_buf)
++		return -ENOMEM;
++
++	ret = devm_mutex_init(dev, &ts->lock);
++	if (ret)
++		return ret;
++
++	INIT_DELAYED_WORK(&ts->fw_work, nvt_fw_work);
++	spi_set_drvdata(spi, ts);
++
++	spi->mode = SPI_MODE_0;
++	spi->bits_per_word = 8;
++	ret = spi_setup(spi);
++	if (ret)
++		return dev_err_probe(dev, ret, "SPI setup failed\n");
++
++	ts->fw_name = ts->chip->default_fw_name;
++	device_property_read_string(dev, "firmware-name", &ts->fw_name);
++	ts->fw_name = nvt_fw_name_for_panel(dev, ts->fw_name);
++
++	input = devm_input_allocate_device(dev);
++	if (!input)
++		return -ENOMEM;
++
++	ts->input = input;
++	input->name = "Novatek NT36523 Touchscreen";
++	input->id.bustype = BUS_SPI;
++
++	input_set_abs_params(input, ABS_MT_POSITION_X, 0, ts->chip->max_x - 1, 0, 0);
++	input_set_abs_params(input, ABS_MT_POSITION_Y, 0, ts->chip->max_y - 1, 0, 0);
++	input_set_abs_params(input, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
++	input_set_abs_params(input, ABS_MT_PRESSURE, 0, NVT_MAX_PRESSURE, 0, 0);
++	touchscreen_parse_properties(input, true, &ts->prop);
++
++	ret = input_mt_init_slots(input, NVT_MAX_FINGERS,
++				  INPUT_MT_DIRECT | INPUT_MT_DROP_UNUSED);
++	if (ret)
++		return ret;
++
++	ret = devm_request_threaded_irq(dev, spi->irq, NULL, nvt_irq_thread,
++					IRQF_ONESHOT | IRQF_NO_AUTOEN,
++					dev_name(dev), ts);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to request interrupt\n");
++
++	ret = input_register_device(input);
++	if (ret)
++		return ret;
++
++	ret = devm_add_action_or_reset(dev, nvt_cleanup, ts);
++	if (ret)
++		return ret;
++
++	ts->is_follower = drm_is_panel_follower(dev);
++	if (ts->is_follower) {
++		ts->follower.funcs = &nvt_panel_follower_funcs;
++		ret = devm_drm_panel_add_follower(dev, &ts->follower);
++		if (ret)
++			return dev_err_probe(dev, ret, "failed to follow the panel\n");
++	} else {
++		dev_warn(dev, "no panel to follow, assuming the display is already on\n");
++		nvt_start(ts, 0);
++	}
++
++	return 0;
++}
++
++static const struct nvt_mem_map nt36523_mem_map = {
++	.event_buf_addr		= 0x2fe00,
++	.boot_rdy_addr		= 0x3f10d,
++	.tx_auto_copy_en	= 0x3f7e8,
++	.spi_dma_tx_info	= 0x3f7f1,
++	.ilm_length_addr	= 0x3f118,
++	.dlm_length_addr	= 0x3f130,
++	.ilm_des_addr		= 0x3f128,
++	.dlm_des_addr		= 0x3f12c,
++	.g_ilm_checksum_addr	= 0x3f100,
++	.g_dlm_checksum_addr	= 0x3f104,
++	.r_ilm_checksum_addr	= 0x3f120,
++	.r_dlm_checksum_addr	= 0x3f124,
++	.bld_crc_en_addr	= 0x3f30e,
++	.bld_ilm_dlm_crc_addr	= 0x3f133,
++};
++
++static const struct nvt_chip_data nt36523_data = {
++	.name			= "NT36523",
++	.mmap			= &nt36523_mem_map,
++	.swrst_n8_addr		= 0x3f0fe,
++	.spi_rd_fast_addr	= 0x3f310,
++	.id			= { 0xff, 0xff, 0xff, 0x23, 0x65, 0x03 },
++	.id_mask		= { 0, 0, 0, 1, 1, 1 },
++	.max_x			= 1200,
++	.max_y			= 2000,
++	.default_fw_name	= "novatek/nt36523.bin",
++};
++
++static const struct of_device_id nvt_of_match[] = {
++	{ .compatible = "novatek,nt36523-spi", .data = &nt36523_data },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, nvt_of_match);
++
++static const struct spi_device_id nvt_spi_ids[] = {
++	{ "nt36523-spi", (kernel_ulong_t)&nt36523_data },
++	{ }
++};
++MODULE_DEVICE_TABLE(spi, nvt_spi_ids);
++
++static struct spi_driver nvt_spi_driver = {
++	.driver = {
++		.name = "novatek-nt36523-spi",
++		.of_match_table = nvt_of_match,
++		.pm = pm_sleep_ptr(&nvt_pm_ops),
++	},
++	.probe = nvt_probe,
++	.id_table = nvt_spi_ids,
++};
++module_spi_driver(nvt_spi_driver);
++
++MODULE_DESCRIPTION("Novatek NT36523 SPI touchscreen driver");
++MODULE_LICENSE("GPL");
