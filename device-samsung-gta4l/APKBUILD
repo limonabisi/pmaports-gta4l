@@ -3,11 +3,11 @@
 pkgname=device-samsung-gta4l
 pkgdesc="Samsung Galaxy Tab A7 10.4 2020"
 pkgver=2
-pkgrel=11
+pkgrel=12
 url="https://github.com/limonabisi/pmaports-gta4l"
 license="MIT"
 arch="aarch64"
-options="!check !archcheck"
+options="!check !archcheck !strip !tracedeps"
 depends="
 	bootmac
 	firmware-samsung-gta4l-adreno
@@ -16,6 +16,7 @@ depends="
 	firmware-samsung-gta4l-ipa
 	firmware-samsung-gta4l-radio
 	firmware-samsung-gta4l-rproc
+	firmware-samsung-gta4l-speaker
 	firmware-samsung-gta4l-touch
 	firmware-samsung-gta4l-venus
 	linux-firmware-qca
