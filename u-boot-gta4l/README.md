@@ -12,6 +12,9 @@ branch `gta4l` at `0824f9a3`:
   Adds the SM4250 msm-id and the novatek/focaltech touch stubs ABL looks up.
 - `0002`: drops the old SD-card bootargs (`nr_cpus=1`, `pmos.root=/dev/mmcblk1p1`)
   from the DTS and keeps repeated options such as `console=`.
+- `0003`: draws the charger state as a battery of four bars instead: a bolt
+  and three bars while charging, four bars when full, "!" and one bar when
+  charging stopped.
 
 Build:
 
