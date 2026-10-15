@@ -29,4 +29,7 @@ package() {
 }
 
 # Generate with: pmbootstrap checksum hexagonrpcd-gta4l
-sha512sums=""
+sha512sums="
+866ffde3110d3744cd6ea0dd4b965e640e293e21a77cd3767ba770515ed09dda11667d70f806d4fedad283d7e38671c2d455b6c612b7225a038930d3eac5bc2c  hexagonrpc-da7a3742ab8d5273a281b70ee11f16fb2cb6a690.tar.gz
+450b482bc894bf3358a3b684ac8de327f068580c020cb0beed273b3f2e7b84351fa954b250cc9aebfba9da71f9ee95d0c7bdcb6ae23f4145131994dc25dfc262  0001-rpcd-serve-sns_reg_version-next-to-the-sensor-registry.patch
+"

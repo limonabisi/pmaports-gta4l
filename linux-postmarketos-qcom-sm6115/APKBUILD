@@ -4,7 +4,7 @@
 # gta4l-7.2 plus the gta4l work as one commit per driver and one for the DTS).
 pkgname=linux-postmarketos-qcom-sm6115
 pkgver=7.2.0
-pkgrel=3
+pkgrel=4
 pkgdesc="Mainline kernel fork for the Samsung Galaxy Tab A7 10.4 2020 (SM6115)"
 arch="aarch64"
 _carch="arm64"
@@ -27,13 +27,13 @@ makedepends="
 	python3
 "
 
-_commit="1f0c402d719bac8c1a1ede6cad47109ff280f929"
+_commit="435ef3a8e5fd10cd519d72a6bd8f1886f84eefae"
 _config="config-$_flavor.$arch"
 source="
 	$pkgname-$_commit.tar.gz::https://github.com/limonabisi/linux-gta4l/archive/$_commit.tar.gz
 	$_config
 	"
-builddir="$srcdir/linux-$_commit"
+builddir="$srcdir/linux-gta4l-$_commit"
 
 prepare() {
 	default_prepare
@@ -65,4 +65,7 @@ package() {
 }
 
 # Generate with: pmbootstrap checksum linux-postmarketos-qcom-sm6115
-sha512sums=""
+sha512sums="
+ac34d8b5a5f682cafd2f271553c1b349bebb458119fd3a609a0c7d0a186b4cfcd7bb2e881e5de78bf995fb4a9a30f2d752915ca6a4b11ee8b9a5911d52a82b34  linux-postmarketos-qcom-sm6115-435ef3a8e5fd10cd519d72a6bd8f1886f84eefae.tar.gz
+1e8f49e9358079b4666a98d0e5c12126e52e14bb7a4908cde35705f3102e2051ace55d16f034f071bd02f6b85d3daafcb986598bd392b4ed368bb32c530c54a6  config-postmarketos-qcom-sm6115.aarch64
+"

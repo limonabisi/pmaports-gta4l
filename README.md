@@ -2,41 +2,52 @@
 
 postmarketOS packages for gta4l, one folder per package (the same layout as
 [LinuxForGta4l/postmarketos-packages-gta4l](https://github.com/LinuxForGta4l/postmarketos-packages-gta4l)).
-Copy the folders into `device/testing/` of your pmaports checkout
+
+## Building
+
+Copy the package folders into `device/testing/` of your pmaports checkout
 (`pmbootstrap config aports` shows where it is), then:
 
 ```sh
-pmbootstrap checksum linux-postmarketos-qcom-sm6115 device-samsung-gta4l hexagonrpcd-gta4l firmware-samsung-gta4l
-pmbootstrap init        # vendor: samsung, device: gta4l
+pmbootstrap init        # vendor: samsung, device: gta4l, UI: plasma-desktop
 pmbootstrap install
+pmbootstrap export      # boot.img and the rootfs image
 ```
 
-The `sha512sums` are left empty on purpose: generate them with the first
-command above.
+The `sha512sums` are filled in. If you change a file, regenerate them with
+`pmbootstrap checksum <package>`.
+
+The tablet boots through U-Boot: build it from `u-boot-gta4l/` (see its
+README) and wrap the pmOS `boot.img` with `UBOOT-BOOTIMG.py`, which also
+writes the Odin tar to flash as AP.
 
 ## Packages
 
 | Package | What it is |
 |---|---|
-| `linux-postmarketos-qcom-sm6115` | Kernel 7.2: [LinuxForGta4l/linux](https://github.com/LinuxForGta4l/linux) `gta4l-7.2` at `c91d0e9` plus the `.patch` files in this folder. The same tree with the patches applied is at [limonabisi/linux-gta4l](https://github.com/limonabisi/linux-gta4l). |
-| `device-samsung-gta4l` | deviceinfo, firmware import from the tablet's own partitions, speaker tuning import, ALSA UCM, headset jack handling, USB network gadget id, battery count kept across reboots. |
-| `device-samsung-gta4l-charger` | Charging screen when a charger is plugged into the powered-off tablet (`androidboot.mode=charger`). |
+| `linux-postmarketos-qcom-sm6115` | Kernel 7.2 straight from [limonabisi/linux-gta4l](https://github.com/limonabisi/linux-gta4l) branch `gta4l-7.2-clean`: LinuxForGta4l `gta4l-7.2` plus one commit per driver and one for the DTS. No patch files. |
+| `device-samsung-gta4l` | deviceinfo, firmware import from the tablet's own partitions (read with mtools, never mounted), speaker tuning import, ALSA UCM, wake-up source rule, PAM fix for the systemd user manager, battery count kept across reboots. |
+| `device-samsung-gta4l-charger` | Landscape charging screen when a charger is plugged into the powered-off tablet (`androidboot.mode=charger`). |
 | `device-samsung-gta4l-sensors` | Accelerometer, light sensor and compass through the ADSP (hexagonrpcd + libssc + iio-sensor-proxy). |
 | `hexagonrpcd-gta4l` | hexagonrpcd with one patch: it also serves `sns_reg_version` next to the sensor registry. |
 | `firmware-samsung-gta4l` | Firmware packages. |
-| `u-boot-gta4l/` | U-Boot patches (charging in U-Boot, charge symbol, ABL command line pass-through) and `UBOOT-BOOTIMG.py` to build a U-Boot boot image. |
+| `u-boot-gta4l/` | U-Boot patches (charging in U-Boot, charge symbol, ABL command line pass-through) and `UBOOT-BOOTIMG.py`. |
 
 ## Status
 
 Working: display, touch (NT36523 lide-hsd), Wi-Fi, Bluetooth, speakers,
-microphone, GPU (Adreno 610, Turnip), battery, offline charging, sleep
-(s2idle), accelerometer/light/compass, H.264 hardware decoding (1080p at about
-50 fps with ffmpeg h264_v4l2m2m), U-Boot.
+microphone, headset jack switching, GPU (Adreno 610, Turnip), battery,
+charging (the PMI632 charger watchdog is kept by the kernel), offline
+charging, sleep (s2idle), accelerometer/light/compass, Venus video decoding
+(1080p H.264 about 99 fps, HEVC about 66 fps), USB OTG at 1.5 A, Ethernet
+over USB, U-Boot.
 
-Venus is still blacklisted in `gta4l-venus.conf` until it has been tried with
-real players (ffmpeg crashes at the end of a stream). The ADSP crashes on resume from s2idle while the
-sensor domain is in use (audio and sensors lost until reboot);
-`gta4l-sensors-sleep.service` stops the sensor services around sleep. Not yet: headset not fully tested; the sensor configuration and registry are taken from the
-tablet's vendor/persist data and are not packaged here.
-
-Patches whose subject starts with `TEST` are still being tried on hardware.
+Known problems:
+- Headphones: only the left channel plays; the right channel's data does not
+  reach the WCD937x (its HPHR PDM watchdog trips).
+- The ADSP crashes on resume from s2idle while the sensor domain is in use;
+  `gta4l-sensors-sleep.service` stops the sensor services around sleep.
+- Battery level: the coulomb count now follows the voltage when they disagree
+  by more than 25 points on battery; still being verified on the tablet.
+- The sensor configuration and registry are taken from the tablet's
+  vendor/persist data and are not packaged here.
