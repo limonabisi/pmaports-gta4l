@@ -2,7 +2,7 @@
 maintainer=""
 pkgname=firmware-samsung-gta4l
 pkgver=0
-pkgrel=3
+pkgrel=4
 pkgdesc="Firmware for Samsung Galaxy Tab A7 10.4 2020"
 subpackages="
 	$pkgname-adreno
@@ -12,6 +12,7 @@ subpackages="
 	$pkgname-radio
 	$pkgname-rproc
 	$pkgname-rproc-openrc:rproc_openrc
+	$pkgname-speaker
 	$pkgname-touch:touch_fw
 	$pkgname-venus
 	"
@@ -22,10 +23,32 @@ options="!check !strip !archcheck !tracedeps pmb:cross-native"
 _commit="0a801b7edb2cb69bcb4f17261bd3a25dba304857"
 _vendor_commit="b3ad53486fafbcca29dbf01d60b0052bb0c060ff"
 _vendor_url="https://github.com/TheMuppets/proprietary_vendor_samsung_gta4l-common/raw/$_vendor_commit/proprietary/vendor/firmware"
-source="
-	$pkgname-$_commit.tar.gz::https://github.com/LinuxForGta4l/firmware-samsung-gta4l/archive/$_commit.tar.gz
-	novatek_ts_fw_lide_hsd-$_vendor_commit.bin::$_vendor_url/novatek_ts_fw_lide_hsd.bin
+
+# Each panel variant of the tablet comes with its own touch controller and
+# firmware; the drivers pick the file named after the fitted panel.
+_touch_fw="
+	novatek_ts_fw_hlt_auo.bin
+	novatek_ts_fw_lce_panda.bin
+	novatek_ts_fw_lide_hsd.bin
+	novatek_ts_fw_txd_inx.bin
+	focal_ts_fw_lide_hsd.bin
+	focal_ts_fw_tianma_tianma.bin
+	focaltech_ts_fw_lide.bin
+	Himax_firmware_djn_jdi.bin
+	Himax_firmware_hlt_auo.bin
+	Himax_firmware_inx_fhd.bin
+	Himax_firmware_lide_hsd.bin
+	Himax_firmware_tianma_tianma.bin
+	Himax_firmware_txd_auo.bin
+	Himax_firmware_txd_auo_al.bin
+	Himax_firmware_txd_inx.bin
 	"
+_speaker_fw="fs1801.fsm"
+
+source="$pkgname-$_commit.tar.gz::https://github.com/LinuxForGta4l/firmware-samsung-gta4l/archive/$_commit.tar.gz"
+for _f in $_touch_fw $_speaker_fw; do
+	source="$source ${_f%.*}-$_vendor_commit.${_f##*.}::$_vendor_url/$_f"
+done
 builddir="$srcdir/$pkgname-$_commit/"
 
 package() {
@@ -91,11 +114,24 @@ rproc_openrc() {
 	mkdir "$subpkgdir"
 }
 
-touch_fw() {
-	pkgdesc="Samsung Galaxy Tab A7 10.4 2020 touchscreen firmware (NT36523 lide-hsd panel)"
+speaker() {
+	pkgdesc="Samsung Galaxy Tab A7 10.4 2020 speaker amplifier tuning"
 
-	install -Dm644 "$srcdir"/novatek_ts_fw_lide_hsd-$_vendor_commit.bin \
-		"$subpkgdir"/lib/firmware/novatek_ts_fw_lide_hsd.bin
+	local f
+	for f in $_speaker_fw; do
+		install -Dm644 "$srcdir/${f%.*}-$_vendor_commit.${f##*.}" \
+			"$subpkgdir/lib/firmware/$f"
+	done
+}
+
+touch_fw() {
+	pkgdesc="Samsung Galaxy Tab A7 10.4 2020 touchscreen firmware (all panel variants)"
+
+	local f
+	for f in $_touch_fw; do
+		install -Dm644 "$srcdir/${f%.*}-$_vendor_commit.${f##*.}" \
+			"$subpkgdir/lib/firmware/$f"
+	done
 }
 
 venus() {
@@ -107,5 +143,20 @@ venus() {
 
 sha512sums="
 5e73c653c67a51a7e44422ef6489a540d5901eea26eba3ed80e156caefa6885ef4a60b3e4d2e801ec99955e02318c7474902a9fe4ef759f6771540c07f6d4e6c  firmware-samsung-gta4l-0a801b7edb2cb69bcb4f17261bd3a25dba304857.tar.gz
+523676537d0484fab7eedfe7b7ac3140c55ff7f79438b47a76a0ec8bbd5921d7b2b624848bed3441194c7392630072edd21cd0c2d0c0f8f3b956690b95e86f7f  novatek_ts_fw_hlt_auo-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+9335aeaeeec5ef75ed74efe887aed041912dc22b9dbc412e865ab7ff028235e380dd43a1708f3c03bf6444a88488c88d581365a0289e3b09aa2dc7b39f7cdd22  novatek_ts_fw_lce_panda-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
 9fc93963b345c9b8a0071265759985858ddd4c9bb7650f0e3ece052086a7f657d80d0cb69b76335078ecf3a8273c3dc08c9d8290d14fa384db117a327781cceb  novatek_ts_fw_lide_hsd-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+3d16bb10d1babdbf66ad379e569e98c5c8cf49d9bbd0f19eb91fe5e34e77fa2c269dd9a6b3f660180b4999841502a45a1ef464edbb06a1304057b7e028efcb5a  novatek_ts_fw_txd_inx-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+1dc4a8958d5256d1b4c98994028c218a24de4ee6ac438feaa170ef8b4d4485dcd6afef495eec4a5263c9486987bbf8f9649499ace5d22bce53f7e8467ebb2a4c  focal_ts_fw_lide_hsd-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+399fdea2df22b358d9e46d035e88c567a6b1707466424108aa94ea670c8959c2bcc13335324a4e5e45062b5435d1b21307f8bc6be5dafecf018c7198a52554d5  focal_ts_fw_tianma_tianma-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+0073a159dc84b01e38bcc413deac806ca7ed08f23889a78e9510e155319dd496434172562a0c8f46bff37dd347e09d75bbcbfe20ec4b4e6430cc91c7839bb156  focaltech_ts_fw_lide-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+85bcb989c4b22db994de3dc9fd7756305fe86f68b700b3458c845bc09cbf4855c5d25e6cc17477cacac3021e2a7cb9d3f0b94aa1eee7b645e8870504cd025329  Himax_firmware_djn_jdi-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+82ef5f348809341bd3961b11825334322bca9766f69eaddbb55ec4ac838d648ac0a8adef2f70eb907f88e94edf2263bbe8d77c333f1eecc853bb9eb47f654f63  Himax_firmware_hlt_auo-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+ba6ef3238b0ece972274fb4155392f3737d42bb2e47f32c146873a2929309144234428e664405c71797d1c4bbca341560c0a79eb4448141b2d09abfff7133733  Himax_firmware_inx_fhd-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+3ff775446dd414a3a429ef355aa86579ffb5e7d186cf292a90a0c8ae19bdd4b79116a0decf43c3aa84aae7d043c21012e19cfc82daa812be9ddb0de8e60b660e  Himax_firmware_lide_hsd-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+4664cef314106716e9d253df189d78389e7e05397395ffab7991dd3a086ee213b662de31110d17c0d6eaf6bb6249bad47f3c1d1840043d4a3dae682724cf278e  Himax_firmware_tianma_tianma-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+ed3a6f5a4e76c5205c9649bbe19ef599efb95782847c8865209b5306feba695a48a6a745db51c9c9ccbde9bf5af3b81afa833c51beef96470c055e1b5ec4040f  Himax_firmware_txd_auo-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+739ffec38f6bdec2ddb89fecd80c91636bf645e2a094e1b03479115ab9abb89b5fca8f46f36c9a9edb1ddee1fe0f06e25a2a440f35dc50628ba3f6ec5de82c40  Himax_firmware_txd_auo_al-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+580f6741db530cdc5188c5d89e9f0eb1de0677b1cd15d8ba04d6550f51d315d850e9b858874c1d5b17b4a15ef08033a63e6d9529e1ba1ab446885b5106fc7deb  Himax_firmware_txd_inx-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.bin
+1f14c02af313534eddcefe0667822f8210f5d31d7a98f9dcbea37cda576106fd14ee43eae857b48044dc5dae96fd4b9d10c9ed613fdb3ba93206511849017698  fs1801-b3ad53486fafbcca29dbf01d60b0052bb0c060ff.fsm
 "
