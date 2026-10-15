@@ -1,11 +1,10 @@
 # Maintainer: limonabisi
 # Kernel for the Samsung Galaxy Tab A7 10.4 2020 (gta4l), SM6115.
-# Base: LinuxForGta4l/linux gta4l-7.2 (v6lhost); the patches below are the
-# gta4l work kept on top of it. Patches marked TEST are still being tried
-# out on the hardware.
+# Source: limonabisi/linux-gta4l, branch gta4l-7.2-clean (LinuxForGta4l
+# gta4l-7.2 plus the gta4l work as one commit per driver and one for the DTS).
 pkgname=linux-postmarketos-qcom-sm6115
 pkgver=7.2.0
-pkgrel=0
+pkgrel=1
 pkgdesc="Mainline kernel fork for the Samsung Galaxy Tab A7 10.4 2020 (SM6115)"
 arch="aarch64"
 _carch="arm64"
@@ -28,37 +27,11 @@ makedepends="
 	python3
 "
 
-_commit="c91d0e94385f75a8788cfc9d8a4f532b3994e6da"
+_commit="389cd3a9d254d4026037c92e358223ae54eebebf"
 _config="config-$_flavor.$arch"
 source="
-	$pkgname-$_commit.tar.gz::https://github.com/LinuxForGta4l/linux/archive/$_commit.tar.gz
+	$pkgname-$_commit.tar.gz::https://github.com/limonabisi/linux-gta4l/archive/$_commit.tar.gz
 	$_config
-	0001-arm64-dts-qcom-gta4l-switch-to-NT36523-lide-hsd-pane.patch
-	0002-arm64-dts-qcom-gta4l-enable-the-QUP-wrapper-and-the-.patch
-	0003-arm64-dts-qcom-gta4l-describe-the-WCN3988-Bluetooth-.patch
-	0004-power-supply-add-a-read-only-QGauge-battery-monitor-.patch
-	0005-gta4l-fixes-from-review-and-simulation-of-the-panel-.patch
-	0006-Input-add-Novatek-NT36523-SPI-touchscreen-driver-and.patch
-	0007-arm64-dts-qcom-gta4l-power-the-USB-port-from-the-PMI.patch
-	0008-TEST-gta4l-enable-Venus-with-Samsung-firmware-6.0.49.patch
-	0009-TEST-gta4l-FourSemi-FS18xx-speaker-amplifiers-and-so.patch
-	0010-TEST-gta4l-battery-resistance-as-measured-drop-Venus.patch
-	0011-TEST-gta4l-keep-the-generic-battery-resistance.patch
-	0012-TEST-gta4l-one-panel-driver-for-every-panel-variant-.patch
-	0013-TEST-gta4l-keep-PM6125-L21-on-as-the-stock-tree-does.patch
-	0014-TEST-power-supply-qcom_qg-follow-the-charger-s-plug-.patch
-	0015-TEST-Input-novatek-nt36523-spi-pick-the-firmware-of-.patch
-	0016-TEST-gta4l-describe-the-WCD937x-headset-codec-LPASS-.patch
-	0017-TEST-gta4l-use-the-SM6115-TX-macro-input-names-in-th.patch
-	0018-TEST-gta4l-let-the-touch-driver-of-the-fitted-panel-.patch
-	0019-TEST-Input-add-a-FocalTech-FT8201AB-SPI-touchscreen-.patch
-	0020-TEST-gta4l-headset-ground-switch-is-normally-closed-.patch
-	0021-arm64-dts-qcom-sm6115-samsung-gta4l-scale-MBHC-heads.patch
-	0022-soc-qcom-smp2p-only-reset-inbound-last_value-on-actu.patch
-	0023-power-supply-qcom_qg-count-charge-in-and-out-instead.patch
-	0024-arm64-dts-qcom-gta4l-add-the-touch-nodes-and-msm-ids.patch
-	0025-drm-panel-samsung-gta4l-leave-the-display-off-when-t.patch
-	0026-clk-qcom-gcc-sm6115-let-Venus-switch-the-vcodec0-GDS.patch
 	"
 builddir="$srcdir/linux-$_commit"
 

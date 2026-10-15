@@ -3,7 +3,7 @@
 pkgname=device-samsung-gta4l
 pkgdesc="Samsung Galaxy Tab A7 10.4 2020"
 pkgver=2
-pkgrel=2
+pkgrel=3
 url="https://github.com/limonabisi/pmaports-gta4l"
 license="MIT"
 arch="aarch64"
@@ -57,7 +57,7 @@ source="
 	gta4l-ses-kontrol.service
 	gta4l-usb-ag
 	gta4l-usb-ag.service
-	gta4l-venus.conf
+	gta4l-modules.conf
 	hexagonrpcd-adsp-rootpd-gta4l.conf
 	hexagonrpcd-adsp-sensorspd-gta4l.conf
 	"
@@ -98,7 +98,9 @@ package() {
 
 	install -Dm644 "$srcdir"/90-gta4l-scan.conf -t \
 		"$pkgdir"/usr/lib/NetworkManager/conf.d/
-	install -Dm644 "$srcdir"/gta4l-venus.conf -t "$pkgdir"/usr/lib/modprobe.d/
+	# No device node to match: the charger watchdog keeper is loaded by name
+	install -Dm644 "$srcdir"/gta4l-modules.conf \
+		"$pkgdir"/usr/lib/modules-load.d/gta4l.conf
 }
 
 sensors() {
