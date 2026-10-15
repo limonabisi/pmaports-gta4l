@@ -1,121 +1,13 @@
 #!/bin/sh
-# Boot-time setup for the tablet: speaker tuning file, sleep, swap, CPU cores.
-# It stays quiet unless /etc/gta4l-debug exists; with that file it also
-# prints hardware state to the kernel log (UART) every few seconds.
-DBG=
-[ -e /etc/gta4l-debug ] && DBG=1
-out() { [ -n "$DBG" ] && echo "gta4l-report: $*" > /dev/kmsg; return 0; }
+# Hardware report for debugging: prints the state of the battery, charger,
+# remote processors, GPU, sound, Venus, network and touch to the kernel log
+# (and so the UART) for about five minutes after boot. Not enabled by default:
+#   systemctl enable gta4l-debug-report
+out() { echo "gta4l-report: $*" > /dev/kmsg; }
 P=/sys/class/power_supply/qcom-qg-battery
 batt() { out "t=$(cut -d' ' -f1 /proc/uptime) batt $(cat $P/capacity)% $(($(cat $P/voltage_now) / 1000))mV $(($(cat $P/current_now) / 1000))mA $(cat $P/status) usbin=$(cat /sys/bus/iio/devices/iio:device*/in_voltage_usb_in_v_div_16_input 2>/dev/null)"; }
 
-# The speaker amplifiers need their tuning file, which Samsung keeps in the
-# vendor partition inside "super". Read it out once (nothing is written to
-# the eMMC).
-le32() {
-	v=$(dd if="$1" bs=1 skip="$2" count=4 2>/dev/null | od -An -tu4 2>/dev/null | tr -d ' \n')
-	[ -n "$v" ] || v=$(dd if="$1" bs=1 skip="$2" count=4 2>/dev/null | hexdump -v -e '1/4 "%u"' 2>/dev/null)
-	echo "${v:-0}"
-}
-vendorfw() {
-	F=$(ls /lib/firmware/*.fsm 2>/dev/null | tr '\n' ' ')
-	[ -n "$F" ] && { out "vendor: already imported: $F"; return; }
-	S=$(ls /dev/disk/by-partlabel/super 2>/dev/null)
-	[ -n "$S" ] || { out "vendor: no super partition"; return; }
-	H=12288
-	[ "$(le32 $S $H)" = 1095520304 ] || { out "vendor: bad metadata magic $(le32 $S $H)"; return; }
-	HS=$(le32 $S $((H + 8)))
-	PO=$(le32 $S $((H + 80))); PN=$(le32 $S $((H + 84))); PS=$(le32 $S $((H + 88)))
-	EO=$(le32 $S $((H + 92))); ES=$(le32 $S $((H + 100)))
-	T=$((H + HS))
-	i=0; FOUND=
-	while [ $i -lt "$PN" ]; do
-		P=$((T + PO + i * PS))
-		N=$(dd if=$S bs=1 skip=$P count=36 2>/dev/null | tr -d '\0')
-		FE=$(le32 $S $((P + 40))); NE=$(le32 $S $((P + 44)))
-		out "vendor: part $N extents=$NE"
-		case "$N" in vendor|vendor_a) [ "$NE" -ge 1 ] && FOUND="$FE $NE" ;; esac
-		i=$((i + 1))
-	done
-	[ -n "$FOUND" ] || { out "vendor: no vendor partition in super"; return; }
-	set -- $FOUND
-	[ "$2" = 1 ] || out "vendor: $2 extents, using the first only"
-	E=$((T + EO + $1 * ES))
-	NS=$(le32 $S $E); TS=$(le32 $S $((E + 12)))
-	out "vendor: start sector $TS, $NS sectors"
-	M=/tmp/gta4l-vendor; mkdir -p $M
-	L=$(losetup -r -f --show -o $((TS * 512)) --sizelimit $((NS * 512)) $S) || { out "vendor: losetup failed"; return; }
-	mount -o ro "$L" $M 2>/dev/null || mount -o ro,noload -t ext4 "$L" $M 2>/dev/null || mount -o ro -t erofs "$L" $M 2>/dev/null
-	if mountpoint -q $M; then
-		for f in $(find $M -name '*.fsm' 2>/dev/null); do
-			cp "$f" /lib/firmware/ && out "vendor: copied ${f#$M/} ($(wc -c < "$f") bytes)"
-		done
-		out "vendor: firmware dir: $(ls $M/firmware 2>/dev/null | grep -v -E '^(a6|adsp|cdsp|venus|wlan|ipa|modem)' | tr '\n' ' ' | cut -c1-600)"
-		out "vendor: audio files: $(ls $M/etc 2>/dev/null | grep -i -E 'mixer|audio|sound' | tr '\n' ' ' | cut -c1-500)"
-		umount $M
-	else
-		out "vendor: mount failed, type=$(blkid -o value -s TYPE "$L" 2>&1)"
-	fi
-	losetup -d "$L"
-}
-vendorfw &
-
-# Sleep: these wake the tablet a second after it falls asleep. The power and
-# volume keys keep their wake-up ability.
-nowake() {
-	sleep 20
-	for f in /sys/class/power_supply/*/power/wakeup \
-		 /sys/devices/platform/soc@0/4ac0000.geniqup/4a8c000.serial/power/wakeup \
-		 /sys/devices/platform/soc@0/*.remoteproc/power/wakeup \
-		 /sys/devices/platform/soc@0/4411000.thermal-sensor/power/wakeup; do
-		[ -e "$f" ] && echo disabled > "$f" 2>/dev/null
-	done
-	out "nowake: still enabled: $(find /sys/devices -path '*/power/wakeup' | while read -r f; do [ "$(cat "$f")" = enabled ] && basename "$(dirname "$(dirname "$f")")"; done | tr '\n' ' ')"
-}
-nowake &
-
-# Compressed swap in RAM. The stock service asks for a compressor this kernel
-# does not have, so set it up here with the one that is built in.
-zram() {
-	sleep 3
-	grep -q zram /proc/swaps && { out "zram: already on"; return; }
-	modprobe zram 2>/dev/null
-	Z=/sys/block/zram0
-	[ -d "$Z" ] || { out "zram: no device"; return; }
-	echo 1 > $Z/reset 2>/dev/null
-	echo lzo-rle > $Z/comp_algorithm 2>/dev/null
-	echo 2G > $Z/disksize && mkswap /dev/zram0 >/dev/null 2>&1 && swapon -p 100 /dev/zram0
-	echo 100 > /proc/sys/vm/swappiness
-	out "zram: $(cat $Z/comp_algorithm 2>&1) swaps=$(tail -n +2 /proc/swaps | tr -s ' \t' ' ' | tr '\n' '|') mem=$(grep -E 'MemTotal|MemAvailable' /proc/meminfo | tr -s ' ' | tr '\n' ' ')"
-}
-zram &
-# All eight cores on
-for c in 4 5 6 7; do
-	echo 1 > /sys/devices/system/cpu/cpu$c/online 2>/dev/null
-done
-# Speed follows the load: fast when needed, slow when idle
-for p in /sys/devices/system/cpu/cpufreq/policy*; do
-	for g in schedutil ondemand; do
-		grep -q -w "$g" "$p/scaling_available_governors" 2>/dev/null && echo "$g" > "$p/scaling_governor" 2>/dev/null && break
-	done
-done
-out "governor: $(cat /sys/devices/system/cpu/cpufreq/policy*/scaling_governor 2>&1 | tr '\n' ' ') freq: $(cat /sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq 2>&1 | tr '\n' ' ')"
-out "cpus online: $(cat /sys/devices/system/cpu/online)"
-
-# Everything below is diagnostics
-if [ -z "$DBG" ]; then
-	wait
-	exit 0
-fi
 batt
-
-# Charger registers of the PMI632 (read-only dump through regmap debugfs)
-for d in /sys/kernel/debug/regmap/*; do
-	case "$d" in *-02|*pmic@2*) ;; *) continue ;; esac
-	[ -r "$d/registers" ] || continue
-	out "regmap $d"
-	grep -E '^(10[0-9a-f]{2}|11[0-9a-f]{2}|13[0-9a-f]{2}|15[0-9a-f]{2}|16[0-9a-f]{2}): ' "$d/registers" | grep -v ': 00$' | tr '\n' ' ' | fold -w 900 | while read -r l; do out "reg $l"; done
-done
-out "regmap dirs: $(ls /sys/kernel/debug/regmap 2>&1 | tr '\n' ' ')"
 
 out "fw-import: $(tr '\n' '|' < /var/log/gta4l-firmware-import.log 2>/dev/null | cut -c1-900)"
 for r in /sys/class/remoteproc/*; do out "$(cat "$r/name") state=$(cat "$r/state")"; done
@@ -157,13 +49,6 @@ while [ $i -lt 60 ]; do
 			TCPM_N=$n
 		fi
 	done
-	if [ $((i % 6)) -eq 5 ]; then
-		for d in /sys/kernel/debug/regmap/*-02 /sys/kernel/debug/regmap/*pmic@2*; do
-			[ -r "$d/registers" ] || continue
-			out "chg: $(grep -E '^(100[6-9a-e]|130[6-9a-f]|1310|1340|1366|1370|160[6-9ab]): ' "$d/registers" | tr '\n' ' ')"
-			break
-		done
-	fi
 	i=$((i + 1))
 	if [ $i -eq 6 ]; then
 		out "bluetooth: $(bluetoothctl list 2>&1 | tr '\n' ' ')"

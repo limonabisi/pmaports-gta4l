@@ -1,10 +1,57 @@
 #!/bin/sh
 # Copies the Samsung-signed firmware that belongs to THIS tablet from its own
 # firmware partition (read-only) to /lib/firmware/updates, which the kernel
-# searches before the packaged copies.
+# searches before the packaged copies, and the speaker amplifiers' tuning file
+# from the vendor partition inside "super". Each is done once; nothing is
+# written to the eMMC partitions.
 DST=/lib/firmware/updates/qcom/sm6115/Samsung/gta4l
 LOG=/var/log/gta4l-firmware-import.log
 say() { echo "gta4l-fw: $*" | tee -a "$LOG" > /dev/kmsg 2>/dev/null || true; }
+
+le32() {
+	v=$(dd if="$1" bs=1 skip="$2" count=4 2>/dev/null | od -An -tu4 2>/dev/null | tr -d ' \n')
+	echo "${v:-0}"
+}
+
+# Speaker tuning (*.fsm): find the vendor partition in the super partition's
+# LP metadata, mount it read-only through a loop device and copy the file.
+vendorfw() {
+	ls /lib/firmware/*.fsm >/dev/null 2>&1 && return
+	S=$(ls /dev/disk/by-partlabel/super 2>/dev/null)
+	[ -n "$S" ] || { say "vendor: no super partition"; return; }
+	H=12288
+	[ "$(le32 "$S" $H)" = 1095520304 ] || { say "vendor: bad LP metadata magic"; return; }
+	HS=$(le32 "$S" $((H + 8)))
+	PO=$(le32 "$S" $((H + 80))); PN=$(le32 "$S" $((H + 84))); PS=$(le32 "$S" $((H + 88)))
+	EO=$(le32 "$S" $((H + 92))); ES=$(le32 "$S" $((H + 100)))
+	T=$((H + HS))
+	i=0; FOUND=
+	while [ $i -lt "$PN" ]; do
+		P=$((T + PO + i * PS))
+		N=$(dd if="$S" bs=1 skip=$P count=36 2>/dev/null | tr -d '\0')
+		FE=$(le32 "$S" $((P + 40))); NE=$(le32 "$S" $((P + 44)))
+		case "$N" in vendor|vendor_a) [ "$NE" -ge 1 ] && FOUND="$FE" ;; esac
+		i=$((i + 1))
+	done
+	[ -n "$FOUND" ] || { say "vendor: no vendor partition in super"; return; }
+	E=$((T + EO + FOUND * ES))
+	NS=$(le32 "$S" $E); TS=$(le32 "$S" $((E + 12)))
+	M=/run/gta4l-vendor
+	mkdir -p $M
+	L=$(losetup -r -f --show -o $((TS * 512)) --sizelimit $((NS * 512)) "$S") ||
+		{ say "vendor: losetup failed"; return; }
+	if mount -o ro "$L" $M 2>/dev/null || mount -o ro,noload -t ext4 "$L" $M 2>/dev/null ||
+	   mount -o ro -t erofs "$L" $M 2>/dev/null; then
+		for f in $(find $M -name '*.fsm' 2>/dev/null); do
+			cp "$f" /lib/firmware/ && say "vendor: copied ${f#$M/}"
+		done
+		umount $M
+	else
+		say "vendor: cannot mount the vendor partition"
+	fi
+	losetup -d "$L"
+}
+vendorfw
 
 [ -e "$DST/.imported" ] && exit 0
 
