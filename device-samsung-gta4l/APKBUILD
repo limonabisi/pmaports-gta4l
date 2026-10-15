@@ -25,7 +25,7 @@ depends="
 	mtools
 	postmarketos-base
 	"
-makedepends="devicepkg-dev"
+makedepends="devicepkg-dev linux-headers"
 builddir="$srcdir"
 subpackages="
 	$pkgname-sensors
