@@ -27,7 +27,7 @@ makedepends="
 	python3
 "
 
-_commit="010998bbab91a951e93df0667b632a5eb1cff993"
+_commit="1ded55852793e5d5cfb47c25cc3380232d262710"
 _config="config-$_flavor.$arch"
 source="
 	$pkgname-$_commit.tar.gz::https://github.com/limonabisi/linux-gta4l/archive/$_commit.tar.gz

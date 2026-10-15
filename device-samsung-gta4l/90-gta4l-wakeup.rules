@@ -1,7 +1,9 @@
 # These wake the tablet a second after it falls asleep: the battery and
 # charger supplies, the debug UART, the remote processors and the thermal
 # sensor. The power and volume keys and the RTC keep their wake-up ability.
-ACTION=="add", SUBSYSTEM=="power_supply", TEST=="power/wakeup", ATTR{power/wakeup}="disabled"
-ACTION=="bind", SUBSYSTEM=="platform", KERNEL=="4a8c000.serial", ATTR{power/wakeup}="disabled"
-ACTION=="bind", SUBSYSTEM=="platform", KERNEL=="*.remoteproc", ATTR{power/wakeup}="disabled"
-ACTION=="bind", SUBSYSTEM=="platform", KERNEL=="4411000.thermal-sensor", ATTR{power/wakeup}="disabled"
+# "add" covers the devices already there when udev starts (coldplug),
+# "bind" the ones whose driver comes later as a module.
+ACTION=="add|bind|change", SUBSYSTEM=="power_supply", TEST=="power/wakeup", ATTR{power/wakeup}="disabled"
+ACTION=="add|bind", SUBSYSTEM=="platform", KERNEL=="4a8c000.serial", TEST=="power/wakeup", ATTR{power/wakeup}="disabled"
+ACTION=="add|bind", SUBSYSTEM=="platform", KERNEL=="*.remoteproc", TEST=="power/wakeup", ATTR{power/wakeup}="disabled"
+ACTION=="add|bind", SUBSYSTEM=="platform", KERNEL=="4411000.thermal-sensor", TEST=="power/wakeup", ATTR{power/wakeup}="disabled"
