@@ -18,6 +18,8 @@ deviceinfo_create_initfs_extra="false"
 # USB network gadget: Linux Foundation multifunction composite gadget
 deviceinfo_usb_idVendor="0x1d6b"
 deviceinfo_usb_idProduct="0x0104"
+# No compressed swap in RAM
+deviceinfo_zram_swap_pct="0"
 
 # Bootloader related
 deviceinfo_flash_method="fastboot"
