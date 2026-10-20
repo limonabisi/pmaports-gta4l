@@ -1,5 +1,0 @@
-#!/bin/sh
-# Bootloader started us because a charger was plugged into a powered-off
-# tablet: boot only the charging screen instead of the full system.
-grep -q 'androidboot.mode=charger' /proc/cmdline || exit 0
-ln -sf /usr/lib/systemd/system/gta4l-charger.target "$2/default.target"

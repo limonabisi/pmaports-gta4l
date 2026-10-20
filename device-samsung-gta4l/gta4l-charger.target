@@ -1,5 +1,0 @@
-[Unit]
-Description=Offline charging (charger plugged into a powered-off tablet)
-Requires=sysinit.target gta4l-charger.service
-After=sysinit.target gta4l-charger.service
-AllowIsolate=yes

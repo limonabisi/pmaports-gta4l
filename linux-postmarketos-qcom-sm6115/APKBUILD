@@ -5,7 +5,7 @@
 # https://github.com/limonabisi/linux-gta4l.
 pkgname=linux-postmarketos-qcom-sm6115
 pkgver=7.2.0
-pkgrel=4
+pkgrel=5
 pkgdesc="Mainline kernel fork for the Samsung Galaxy Tab A7 10.4 2020 (SM6115)"
 arch="aarch64"
 _carch="arm64"
@@ -78,7 +78,7 @@ package() {
 # Generate with: pmbootstrap checksum linux-postmarketos-qcom-sm6115
 sha512sums="
 4535a190f27f4dde22f0a2642d275541d5aa235721ab9a05aa496a8736efe309b8aac3268191a3c41006b1594fff9a3f3d6438521d91e574f0d77c0a5908d628  linux-postmarketos-qcom-sm6115-c91d0e94385f75a8788cfc9d8a4f532b3994e6da.tar.gz
-1e8f49e9358079b4666a98d0e5c12126e52e14bb7a4908cde35705f3102e2051ace55d16f034f071bd02f6b85d3daafcb986598bd392b4ed368bb32c530c54a6  config-postmarketos-qcom-sm6115.aarch64
+9ada13177c5522c1b034e9c58535919d6f3c2ea22eae3754872095bbc9a1bce847a5474dccf77196990a6bd83268e339099b1c3e61d7ea09ac64c17534a5b799  config-postmarketos-qcom-sm6115.aarch64
 4b9564127341f9b947f6d7eb0be4975f69ad84a7427fa07cfa1789064157304037cf2013901575c808a6dd1e98fcd489075568011e36e0f3072b3dbaf38cd373  0001-clk-qcom-gcc-sm6115-let-Venus-switch-the-vcodec0-GDS.patch
 0fceac0d1835f046e1efb4ddeb462b37451adf13f60d3b20e1a5553ce3c1a98f808c494be314cb57717ce0de671b03d5ab5df88dddfa9857fcc95c3a80288daa  0002-soc-qcom-smp2p-only-reset-inbound-last_value-on-actu.patch
 85b37c5e4987d14d5287aa6d2b060b03e26e83283fff90757444ddcb2f34617081712c2f6ebfb3da3f79b40b6c7e47e052fbd573009e85858074a626fb765e09  0003-media-venus-accept-Samsung-firmware-6.0.49.patch
