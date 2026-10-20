@@ -15,6 +15,9 @@ branch `gta4l` at `0824f9a3`:
 - `0003`: draws the charger state as a battery of four bars instead: a bolt
   and three bars while charging, four bars when full, "!" and one bar when
   charging stopped.
+- `0004`: shows the charge percentage ("NN%", from the PMI632 QGauge voltage)
+  next to the battery, the bars follow it; started by a charger, the tablet
+  stays in the boot menu and keeps charging instead of booting Linux.
 
 Build:
 
