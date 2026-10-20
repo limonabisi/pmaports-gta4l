@@ -12,4 +12,4 @@ ExecStart=/bin/sh -c 'B=/sys/class/power_supply/qcom-qg-battery; D=/var/lib/batt
 ExecStop=/bin/sh -c 'B=/sys/class/power_supply/qcom-qg-battery; D=/var/lib/battery; mkdir -p $D && cat $B/charge_full > $D/charge_full && cat $B/charge_now > $D/charge_now; sync'
 
 [Install]
-WantedBy=multi-user.target gta4l-charger.target
+WantedBy=multi-user.target

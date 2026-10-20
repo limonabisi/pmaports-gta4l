@@ -3,7 +3,7 @@
 pkgname=device-samsung-gta4l
 pkgdesc="Samsung Galaxy Tab A7 10.4 2020"
 pkgver=2
-pkgrel=12
+pkgrel=14
 url="https://github.com/limonabisi/pmaports-gta4l"
 license="MIT"
 arch="aarch64"
@@ -26,11 +26,10 @@ depends="
 	mtools
 	postmarketos-base
 	"
-makedepends="devicepkg-dev linux-headers"
+makedepends="devicepkg-dev"
 builddir="$srcdir"
 subpackages="
 	$pkgname-sensors
-	$pkgname-charger
 	"
 source="
 	deviceinfo
@@ -44,10 +43,6 @@ source="
 	Samsung-Galaxy-Tab-A7.conf
 	gta4l-HiFi.conf
 	gta4l-battery-count.service
-	gta4l-charger-generator
-	gta4l-charger.c
-	gta4l-charger.service
-	gta4l-charger.target
 	gta4l-debug-report
 	gta4l-debug-report.service
 	gta4l-firmware-import
@@ -63,11 +58,14 @@ source="
 	gta4l-ses-kontrol.service
 	hexagonrpcd-adsp-rootpd-gta4l.conf
 	hexagonrpcd-adsp-sensorspd-gta4l.conf
+	50-gta4l-s16.conf
+	90-gta4l-env.conf
+	90-gta4l-journald.conf
+	gta4l-kwalletrc
 	"
 
 build() {
 	devicepkg_build $startdir $pkgname
-	${CC:-gcc} $CFLAGS -O2 -Wall -o gta4l-charger gta4l-charger.c $LDFLAGS
 }
 
 package() {
@@ -110,6 +108,20 @@ package() {
 
 	# Plasma's on-screen keyboard
 	install -Dm644 "$srcdir"/gta4l-kwinrc "$pkgdir"/etc/xdg/kwinrc
+
+	# Defaults that save memory and eMMC writes: no accessibility bus, no
+	# KWallet, no X11 tray/menu bridges, a small journal; 16-bit sound
+	install -Dm644 "$srcdir"/90-gta4l-env.conf \
+		"$pkgdir"/usr/lib/environment.d/90-gta4l.conf
+	install -Dm644 "$srcdir"/90-gta4l-journald.conf \
+		"$pkgdir"/usr/lib/systemd/journald.conf.d/90-gta4l.conf
+	install -Dm644 "$srcdir"/gta4l-kwalletrc "$pkgdir"/etc/xdg/kwalletrc
+	install -Dm644 "$srcdir"/50-gta4l-s16.conf -t \
+		"$pkgdir"/usr/share/wireplumber/wireplumber.conf.d/
+	mkdir -p "$pkgdir"/etc/systemd/user
+	for u in at-spi-dbus-bus plasma-kaccess plasma-xembedsniproxy plasma-gmenudbusmenuproxy; do
+		ln -s /dev/null "$pkgdir"/etc/systemd/user/$u.service
+	done
 }
 
 sensors() {
@@ -136,36 +148,20 @@ sensors() {
 	find "$subpkgdir"/usr/share/qcom -type f -exec chmod 644 {} +
 }
 
-charger() {
-	pkgdesc="Samsung Galaxy Tab A7 10.4 2020: charging screen when a charger is plugged into the powered-off tablet"
-	install_if="$pkgname=$pkgver-r$pkgrel"
-
-	install -Dm755 "$builddir"/gta4l-charger -t "$subpkgdir"/usr/bin/
-	install -Dm755 "$srcdir"/gta4l-charger-generator -t \
-		"$subpkgdir"/usr/lib/systemd/system-generators/
-	install -Dm644 "$srcdir"/gta4l-charger.service -t \
-		"$subpkgdir"/usr/lib/systemd/system/
-	install -Dm644 "$srcdir"/gta4l-charger.target -t \
-		"$subpkgdir"/usr/lib/systemd/system/
-}
 
 # Generate with: pmbootstrap checksum device-samsung-gta4l
 sha512sums="
 68d0babdeff9abb7c60c76a16fb0e4fff1824030a822c5a2c5e74d86c87dae5e6d8e6d02567402f6cdfa2bd81f21f16fc96acf942a339a3d2b51460362bd3785  deviceinfo
 e70bae17df23dcaaaea0e2d3616556f04baa23f8ee1357785c0f539bf97282d8ddff53953e155b72689bb73beb38c2da3d08de2a61e866684edfa10a6593885d  modules-initfs
-5580f8c31dde4e75d4c9e97e965048f1732ad882cc502bcb9733c381dac4dfec35141d35bd20bc19ba8d82da3425294e3de10d524a719c756625d379831b63e2  80-gta4l.preset
+9399bb4c03ece40bb822bf54c0b00485ffaa02b6d53403982bcc85e54fe3ea8e97ed1bf02fc86c5bf9f25617cf24acee4b8642e9d38d69cda9075e7b25cf672f  80-gta4l.preset
 a09c8ce7f49e09359ea8be6bb2c560ce881ddb557dedddb09f08b210ce2257b0072332810c0cffd4fd96daab93b6639576c97be9c4e9f29b18362950b41cccba  80-gta4l-user.preset
 bd33c740991b942112dddfdfe02e215ec5262c14eb72a63297cded7dc6038f94429013af233deb23dd9479bfac4aab1ef714eee2a0910858d8fd22ec6a33f286  90-gta4l-jack.rules
-ad764a72d8958c71d89eacc12f9e22535bdc6073bc0fcb7a36490f58be62e6b9f0a47964c79071d6a1dccd85732ed4df8b17e5648a37fea1f11b99b87da41903  90-gta4l-scan.conf
+4315f6d465b26dcafae0c4de6390895d417d14d8c44395a0c3fc8de3c2e41a159ac90372c19695427dfd005a575e0fa757d72cf0fce8a037fc33b4ad42805c9c  90-gta4l-scan.conf
 658ea574a286967d182d17b8656d05494810f021ab252569e51e1cb8489a877aaa36d99f30c499847a40c67c47129408e0bda14a3f178e2d624e07a9e263f14d  90-gta4l-touch.rules
 d9cc73aed07268d303b125d32ffea95e2f743eb81cf25d3477183a43d627d3de45c331093649777e8d890f99fbc905cfdb7dfe12f08e0e33893076fa4b89763f  90-gta4l-wakeup.rules
 054a8c167f708bb8d79368e2772ab9ce561d8fea84b596d60709fc900c692742ab2201d341fec19ae9e93166afc74ea40f526721c24fbf9ef19a73dba3ecfe34  Samsung-Galaxy-Tab-A7.conf
-0e50429d58ad0b00b2b9fddc4ee0c9076db1ee972bfba71a734f5ee17ee524dbf6d0d099c34f4f5598510f889782e1bfd6ceb2676d335e408b91a8e95f44b7b4  gta4l-HiFi.conf
-b163ad50ef9e130f5bee9f405053380280ff2707d186e0f827e35f3003731d6889ce7fb570a9587f17fbe8cee1bdc93316867f831efb00cca4934126c6190980  gta4l-battery-count.service
-14e3926b3ad1736d3b858980aed84d522bf92a93b35a954430096d1cc46224c95016ff726e4b62079a9b6ec2f0c2fdfedd0ffd9d8e4e3b8dfad0f16e9e638be2  gta4l-charger-generator
-1d05dcf1e8456545f39a924e2d046648528420bbd173ad1960d864abc9136afbcf4f659862a62ccaf7b11b863f06ebd721f7dd42bbd7517512971a6bf716e53d  gta4l-charger.c
-b6b55c78a34b7e209af6905e93aee81f9ec0427f90d3d13407d12f3b899b028d3406ac4b124e78b167bc53e17a955ab0d42fcb611b79a98c7e97befadb0db44f  gta4l-charger.service
-a41773263c5fbf807ae718641580aa52e707772925c911e38b38b0a29787ae9b65ed39cdfafb5e2d9603181a325373f4c940cc5f4570a43ca46413c8533a4eaf  gta4l-charger.target
+516592340aec343e86e1355390d4104905873c1300da515fd69c7b289b0af3dcd4216851a303b528d669ae9359ae5814cd24a908c1880bc0c427d0d3e27699c2  gta4l-HiFi.conf
+93b5cdf6db61144ba3398c95c71dda6601182dc52557471518207a0d7039afe697f1286e77524ed90c11680840f2da42998856b17812049dc5bcb9a21fea4400  gta4l-battery-count.service
 d67746fde30fe27b250d0fedc6c4d3f22baea582446174bcaa567bddcebe4effab31031c4ad4271ce5b3e615e5d1b10daa2ec32cbe2b9ed07f89f1acf8cc27d4  gta4l-debug-report
 a4f42d40e2100a3b7aaa20f6ea135e69dd5d7d9b4450be20984f4802cda59c14f0cfd11f004ca7b9fcb2e0a06f67765c9501dad1307f75b40d2c61eb34a2fc7c  gta4l-debug-report.service
 6c0cc997fc951a2ae85bd45d5aeaece6cbf0a5ba13d15cfea28fc82a8436f01aca8cbc20f2495e2c9ff758e01365eab611274aedf4e0b8742293a32139a620d2  gta4l-firmware-import
@@ -181,4 +177,8 @@ cf4117d8e2202fa5229ad5ba3410a0fdd7e70840718f3589ea9eadb17a59ca108d58675d2f06abd2
 6da38fec1c7fc854d3787674a51073cbe80f3ba5d7d188819e66aa8ba74b1db1c144b1f8d8e0299ca1261715a0184be2ed1c7fec1ef0ef08ea97d41a7ed694da  gta4l-ses-kontrol.service
 30a1718a67dddd30b35298a905ba5729b80c3ed459ccc0eb697f9f26090e2d22e910a5221a5bb2c2f3bef1f0ebba4a930d5f5d99888b3ba1cf48ea34b859ab6e  hexagonrpcd-adsp-rootpd-gta4l.conf
 ff87b9bada77086b253bd15e617a0fe5ca3761e3d699433b1c724663f6f687c7221bdc4258094ecdafbe76ae3fcca9ff3ec97dd42ac1de38cc294d6c400cc914  hexagonrpcd-adsp-sensorspd-gta4l.conf
+fb8f2b23d5fe8537a97918d7f3a221f2ba23c074faffd31fa4ad433ec2bb3b4e491706d01a6020b675705259132097f1c88931ae2ad0ae9756694cd20a10e629  50-gta4l-s16.conf
+41288cdf7a1ba05ad26ace9feb7319fda57278df7b8c22bd378007d01fffb7d306973abfd5b6f83816c9220375be9a86d010aa7770c6d1ef14b5ad13a11e43f1  90-gta4l-env.conf
+3777c7b93de8f69109b7e1f1cb7ce46102bc33cb57524d601d71cc3f52a9b1616dcc96de6ef9a3d40776d74cffdaee43c588e4434aea0ee18ca942de50ca0068  90-gta4l-journald.conf
+2b508a95d79678246edf2928d751a15cbfb36d9d7f2f43e9ae7b61a6c8aa56f0e84b0be68254c2403cd0e689814483e14117de6e9fb93e63a0c305fbec83cfe9  gta4l-kwalletrc
 "

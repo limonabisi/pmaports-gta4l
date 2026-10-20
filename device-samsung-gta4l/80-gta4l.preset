@@ -5,9 +5,11 @@ enable bluetooth.service
 # gta4l
 enable gta4l-firmware-import.service
 enable gta4l-battery-count.service
-enable gta4l-jack-yenile.service
+disable gta4l-jack-yenile.service
 # Sensors on the ADSP (accelerometer, light, compass)
 enable hexagonrpcd-adsp-rootpd.service
 enable hexagonrpcd-adsp-sensorspd.service
 disable hexagonrpcd-sdsp.service
 enable gta4l-sensors-sleep.service
+# eMMC: weekly TRIM
+enable fstrim.timer
