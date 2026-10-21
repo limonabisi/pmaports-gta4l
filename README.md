@@ -3,6 +3,37 @@
 postmarketOS packages for gta4l, one folder per package (the same layout as
 [LinuxForGta4l/postmarketos-packages-gta4l](https://github.com/LinuxForGta4l/postmarketos-packages-gta4l)).
 
+## Install the prebuilt image
+
+The [Releases](https://github.com/limonabisi/pmaports-gta4l/releases) page has a
+ready postmarketOS (Plasma) image for the SM-T500 (Wi-Fi): `gta4l-pmos.tar.xz`
+holds the whole system, U-Boot with the kernel, initramfs and device tree
+(`boot`), `dtbo`, and postmarketOS on `userdata`. The `cache` partition is not
+used.
+
+**This erases everything on the tablet.** You need an unlocked bootloader:
+Settings → Developer options → OEM unlocking, then in Download mode hold
+Volume Up to unlock.
+
+1. Download `gta4l-pmos.tar.xz` and unpack it into `gta4l-pmos.tar`
+   (7-Zip on Windows, `xz -dk gta4l-pmos.tar.xz` on Linux).
+2. Power the tablet off, hold Volume Up + Volume Down and plug in the USB
+   cable: Download mode.
+3. In Odin, put `gta4l-pmos.tar` in **AP** and press Start.
+4. The first boot takes a few minutes while the root filesystem grows to fill
+   `userdata`.
+
+Log in as **`user`**, password **`147147`**.
+
+> ⚠️ SSH is **on** in this image, and `147147` is public: anyone on the same
+> network can log in until you change it. Change the password first thing:
+> open Konsole and run `passwd`.
+
+Over the USB cable the tablet is `user@172.16.42.1`.
+
+Updates: `sudo apk add <package>` for new software. The kernel in use is the
+one inside the `boot` image.
+
 ## Building
 
 Copy the package folders into `device/testing/` of your pmaports checkout
@@ -19,7 +50,11 @@ The `sha512sums` are filled in. If you change a file, regenerate them with
 
 The tablet boots through U-Boot: build it from `u-boot-gta4l/` (see its
 README) and wrap the pmOS `boot.img` with `UBOOT-BOOTIMG.py`, which also
-writes the Odin tar to flash as AP.
+writes the Odin tar to flash as AP. The ready U-Boot source is
+[limonabisi/u-boot-gta4l](https://github.com/limonabisi/u-boot-gta4l).
+
+The `cache` partition is not needed: remove the `/boot` line from
+`/etc/fstab` of the installed rootfs, the kernel comes from the boot image.
 
 ## Packages
 
