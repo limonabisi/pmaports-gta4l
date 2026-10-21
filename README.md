@@ -72,9 +72,10 @@ The `cache` partition is not needed: remove the `/boot` line from
 Working: display, touch (NT36523 lide-hsd), Wi-Fi, Bluetooth, speakers,
 microphone, headset jack switching, GPU (Adreno 610, Turnip), battery,
 charging (the PMI632 charger watchdog is kept by the kernel), offline
-charging (in U-Boot, with the percentage), Bluetooth RFCOMM/BNEP, sleep (s2idle), accelerometer/light/compass, Venus video decoding
-(1080p H.264 about 99 fps, HEVC about 66 fps), USB OTG at 1.5 A, Ethernet
-over USB, U-Boot.
+charging (in U-Boot, with the percentage), Bluetooth RFCOMM/BNEP, sleep
+(s2idle), accelerometer/light/compass, Venus video decoding (1080p H.264
+about 57-97 fps, HEVC about 64 fps, the same frames as software decoding),
+USB OTG at 1.5 A, Ethernet over USB, U-Boot.
 
 Known problems:
 - Venus encoding and VP9 decoding are off: the Samsung firmware (6.0.49) predates the fixes of 6.0.55. H.264 and HEVC decoding work.
@@ -86,5 +87,37 @@ Known problems:
   `gta4l-sensors-sleep.service` stops the sensor services around sleep.
 - Battery level: the coulomb count now follows the voltage when they disagree
   by more than 25 points on battery; still being verified on the tablet.
-- The sensor configuration and registry are taken from the tablet's
-  vendor/persist data and are not packaged here.
+- The sensor configuration and registry come from a Galaxy Tab A7; other
+  units may need their own calibration.
+
+| Feature | Status | Notes |
+|---|:---:|---|
+| Boot (U-Boot + kernel 7.2) | ✅ | Menu: Boot Linux, fastboot, recovery, reboot, power off |
+| Display | ✅ | 1200x2000, brightness control |
+| Touchscreen | ✅ | NT36523 (lide-hsd) tested; firmware of every panel variant included |
+| GPU acceleration | ✅ | Adreno 610: freedreno (OpenGL ES 3.2 / GL 4.6), Turnip (Vulkan) |
+| Plasma (Wayland) | ✅ | On-screen keyboard: plasma-keyboard |
+| Wi-Fi | ✅ | WCN3990, power saving off |
+| Bluetooth | ✅ | RFCOMM and BNEP built |
+| Speakers | ✅ | FS18xx amplifiers |
+| Microphone | ✅ | |
+| Headphones | ⚠️ | Only the left channel plays |
+| Accelerometer / rotation | ✅ | Through the ADSP (libssc) |
+| Ambient light | ✅ | |
+| Magnetometer | ✅ | |
+| Hall effect (cover) | ⚠️ | Not used for the lid yet |
+| Battery level | ⚠️ | The percentage can drift |
+| Charging | ✅ | Charger watchdog kept by the kernel |
+| Offline charging | ✅ | In U-Boot, with the percentage |
+| Suspend (s2idle) | ✅ | Sensor services stopped around sleep |
+| USB networking | ✅ | Tablet at `172.16.42.1` |
+| USB OTG (host) | ✅ | 1.5 A; keyboard, mouse, storage, Ethernet |
+| USB OTG while charging | ❌ | No USB PD on the PMI632 |
+| Hardware video decode | ⚠️ | H.264, HEVC; VP9 off (firmware crash) |
+| Hardware video encode | ❌ | Samsung firmware 6.0.49 is too old |
+| Camera | ❌ | No driver |
+| GPS | ❌ | No position (NMEA times out) |
+| Mobile data / calls | — | SM-T500 is Wi-Fi only; SM-T505 untested |
+| `cache` partition | — | Not needed |
+
+✅ works · ⚠️ partial · ❌ broken · — not applicable
