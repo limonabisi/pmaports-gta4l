@@ -18,6 +18,8 @@ branch `gta4l` at `0824f9a3`:
 - `0004`: shows the charge percentage ("NN%", from the PMI632 QGauge voltage)
   next to the battery, the bars follow it; started by a charger, the tablet
   stays in the boot menu and keeps charging instead of booting Linux.
+- `0005`: the first menu entry is "Boot Linux" (postmarketOS or Arch Linux
+  ARM, whichever is on userdata).
 
 Build:
 

@@ -1,0 +1,39 @@
+From e33e7953f5a74364ea28423621b0f596fcf84a32 Mon Sep 17 00:00:00 2001
+From: limonabisi <herkesanlamaz46@gmail.com>
+Date: Wed, 21 Oct 2026 21:44:02 +0300
+Subject: [PATCH] gta4l: call the first menu entry "Boot Linux"
+
+The same boot image starts postmarketOS or Arch Linux ARM, whichever is
+on userdata.
+---
+ board/qualcomm/qcom-phone.env | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/board/qualcomm/qcom-phone.env b/board/qualcomm/qcom-phone.env
+index cc6dee7e..71280d7c 100644
+--- a/board/qualcomm/qcom-phone.env
++++ b/board/qualcomm/qcom-phone.env
+@@ -19,9 +19,9 @@ serial_gadget=setenv stdin serial,button-kbd,usbacm; \
+ 	echo "Hold the power button to return to the menu"
+ 
+ # The boot menu is the landing point; without a key press it boots
+-# pmOS after 5 seconds. When ABL was started by a charger plugged into
++# Linux after 5 seconds. When ABL was started by a charger plugged into
+ # the powered-off tablet, stay in the menu: it shows the charging symbol
+-# and the charge, and the tablet keeps charging until "Boot pmOS" or
++# and the charge, and the tablet keeps charging until "Boot Linux" or
+ # "Power off" is chosen. Anything that returns to the shell (menu command
+ # exit, failed boot, error) re-opens the menu instead of falling through
+ # to a kernel.
+@@ -40,7 +40,7 @@ menucmd=setenv bootcmd run menucmd; bootmenu -1
+ recovery_mode=bcb load mmc 0 misc; bcb set command boot-recovery; \
+ 	bcb set recovery recovery; bcb store; reset
+ 
+-bootmenu_0=Boot pmOS=bootm $prevbl_initrd_start_addr
++bootmenu_0=Boot Linux=bootm $prevbl_initrd_start_addr
+ bootmenu_1=Enter fastboot mode=run fastboot; sleep 1; run menucmd
+ bootmenu_2=Enter recovery mode=run recovery_mode
+ bootmenu_3=Reboot=reset
+-- 
+2.53.0
+
