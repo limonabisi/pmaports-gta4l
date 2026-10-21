@@ -67,6 +67,40 @@ The `cache` partition is not needed: remove the `/boot` line from
 | `firmware-samsung-gta4l` | Firmware packages. |
 | `u-boot-gta4l/` | U-Boot patches (charging in U-Boot, charge symbol and percentage, ABL command line pass-through) and `UBOOT-BOOTIMG.py`. |
 
+## Panels
+
+Samsung fitted the SM-T500 with 15 different display panels from several
+makers, each with its own touch controller. The bootloader names the fitted
+panel on the kernel command line (`msm_drm.dsi_display0=qcom,mdss_dsi_<panel>`);
+the panel driver (`panel-samsung-gta4l`) picks its power-on sequence and timings
+from that name, and the touch driver of that controller loads the matching
+touch firmware. The other two touch drivers stay off. Nothing has to be set by
+hand: one image works on every variant.
+
+| Panel (bootloader name) | Touch controller | Touch firmware |
+|---|---|---|
+| `nt36523_lide_hsd_video` ✅ tested | Novatek NT36523 | `novatek_ts_fw_lide_hsd.bin` |
+| `nt36523_lce_panda_video` | Novatek NT36523 | `novatek_ts_fw_lce_panda.bin` |
+| `nt36523_hlt_auo_video` | Novatek NT36523 | `novatek_ts_fw_hlt_auo.bin` |
+| `nt36523_txd_inx_video` | Novatek NT36523 | `novatek_ts_fw_txd_inx.bin` |
+| `ft8201ab_lide_hsd_video` | FocalTech FT8201 | `focal_ts_fw_lide_hsd.bin` |
+| `ft8201ab_tianma_tianma_video` | FocalTech FT8201 | `focal_ts_fw_tianma_tianma.bin` |
+| `hx83102_inx_fhd_video` | Himax HX83102 | `Himax_firmware_inx_fhd.bin` |
+| `hx83102e_inx_fhd_video` | Himax HX83102E | `Himax_firmware_inx_fhd.bin` |
+| `hx83102e_txd_inx_video` | Himax HX83102E | `Himax_firmware_txd_inx.bin` |
+| `hx83102e_hlt_auo_video` | Himax HX83102E | `Himax_firmware_hlt_auo.bin` |
+| `hx83102e_txd_auo_video` | Himax HX83102E | `Himax_firmware_txd_auo.bin` |
+| `hx83102e_txd_auo_al_video` | Himax HX83102E | `Himax_firmware_txd_auo_al.bin` |
+| `hx83102e_lide_hsd_video` | Himax HX83102E | `Himax_firmware_lide_hsd.bin` |
+| `hx83102e_tianma_tianma_al_video` | Himax HX83102E | `Himax_firmware_tianma_tianma.bin` |
+| `hx83102e_djn_jdi_video` | Himax HX83102E | `Himax_firmware_djn_jdi.bin` |
+
+The touch firmware of every variant is in `firmware-samsung-gta4l-touch`. Only
+the NT36523 lide-hsd panel has been tested so far; if your tablet has another
+one, `dmesg | grep -i -E "panel|touch"` shows which, and a report is welcome.
+To force a panel (for testing), the touch drivers take `panel=<name>` as a
+module parameter.
+
 ## Status
 
 Working: display, touch (NT36523 lide-hsd), Wi-Fi, Bluetooth, speakers,
