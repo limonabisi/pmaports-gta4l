@@ -1,0 +1,85 @@
+From 65019bffbcb96e497606da579731c984b4d053d0 Mon Sep 17 00:00:00 2001
+From: limonabisi <herkesanlamaz46@gmail.com>
+Date: Wed, 21 Oct 2026 18:42:32 +0300
+Subject: [PATCH] media: venus: leave the encoder and VP9 off on AR50_LITE
+ firmware before 6.0.55
+
+Qualcomm says AR50_LITE firmware older than 6.0.55 has encoder bugs that
+the driver cannot work around. On the Galaxy Tab A7 (gta4l, firmware
+6.0.49) encoding crashes ffmpeg and can take the whole tablet down, and
+VP9 decoding stalls until the firmware raises a fatal error in its VP9
+decoder, after which it cannot be restarted.
+
+With such firmware, register only the decoder and do not offer VP9.
+H.264 and HEVC decoding give the same frames as software decoding.
+
+The system error handler waited on the runtime PM state of both the
+decoder and the encoder device; with no encoder that is a NULL pointer
+dereference, so skip a device that is not there.
+---
+ drivers/media/platform/qcom/venus/core.c    | 22 +++++++++++++++++----
+ drivers/media/platform/qcom/venus/helpers.c |  8 ++++++++
+ 2 files changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/venus/core.c b/drivers/media/platform/qcom/venus/core.c
+index ed818e349..ee4932d57 100644
+--- a/drivers/media/platform/qcom/venus/core.c
++++ b/drivers/media/platform/qcom/venus/core.c
+@@ -104,7 +104,8 @@ static void venus_sys_error_handler(struct work_struct *work)
+ 	core->state = CORE_UNINIT;
+ 
+ 	for (i = 0; i < max_attempts; i++) {
+-		if (!pm_runtime_active(core->dev_dec) && !pm_runtime_active(core->dev_enc))
++		if ((!core->dev_dec || !pm_runtime_active(core->dev_dec)) &&
++		    (!core->dev_enc || !pm_runtime_active(core->dev_enc)))
+ 			break;
+ 		msleep(10);
+ 	}
+@@ -342,9 +343,22 @@ static int venus_add_dynamic_nodes(struct venus_core *core)
+ 	if (ret)
+ 		goto err;
+ 
+-	ret = venus_add_video_core(core, core->res->enc_nodename, "venus-encoder");
+-	if (ret)
+-		goto err;
++	/*
++	 * AR50_LITE firmware older than 6.0.55 has encoder bugs the driver
++	 * cannot work around: encoding crashes the firmware and can take the
++	 * whole SoC down. Offer only the decoder there (VP9 decoding is left
++	 * out as well, see venus_helper_check_codec()).
++	 */
++	if (IS_AR50_LITE(core) && is_fw_rev_or_older(core, 6, 0, 54)) {
++		dev_info(dev, "firmware %u.%u.%u: encoder needs 6.0.55 or newer, leaving it off\n",
++			 core->venus_ver.major, core->venus_ver.minor,
++			 core->venus_ver.rev);
++	} else {
++		ret = venus_add_video_core(core, core->res->enc_nodename,
++					   "venus-encoder");
++		if (ret)
++			goto err;
++	}
+ 
+ 	ret = of_changeset_apply(core->ocs);
+ 	if (ret) {
+diff --git a/drivers/media/platform/qcom/venus/helpers.c b/drivers/media/platform/qcom/venus/helpers.c
+index 59eee3dd9..856b1ba94 100644
+--- a/drivers/media/platform/qcom/venus/helpers.c
++++ b/drivers/media/platform/qcom/venus/helpers.c
+@@ -80,6 +80,14 @@ bool venus_helper_check_codec(struct venus_inst *inst, u32 v4l2_pixfmt)
+ 		return false;
+ 	}
+ 
++	/*
++	 * AR50_LITE firmware older than 6.0.55 raises a fatal error in its
++	 * VP9 decoder and cannot be recovered without a reboot.
++	 */
++	if (codec == HFI_VIDEO_CODEC_VP9 && IS_AR50_LITE(core) &&
++	    is_fw_rev_or_older(core, 6, 0, 54))
++		return false;
++
+ 	if (session_type == VIDC_SESSION_TYPE_ENC && core->enc_codecs & codec)
+ 		return true;
+ 
+-- 
+2.53.0
+

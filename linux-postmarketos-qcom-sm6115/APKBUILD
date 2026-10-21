@@ -5,7 +5,7 @@
 # https://github.com/limonabisi/linux-gta4l.
 pkgname=linux-postmarketos-qcom-sm6115
 pkgver=7.2.0
-pkgrel=5
+pkgrel=7
 pkgdesc="Mainline kernel fork for the Samsung Galaxy Tab A7 10.4 2020 (SM6115)"
 arch="aarch64"
 _carch="arm64"
@@ -43,6 +43,7 @@ source="
 	0008-ASoC-codecs-add-FourSemi-FS18xx-speaker-amplifiers.patch
 	0009-arm64-dts-qcom-sm6115-samsung-gta4l-bring-up-the-tab.patch
 	0010-power-supply-qcom_qg-pull-a-drifted-count-back-to-th.patch
+	0011-media-venus-leave-the-encoder-and-VP9-off-on-AR50_LI.patch
 	"
 builddir="$srcdir/linux-$_commit"
 
@@ -89,4 +90,5 @@ ffdcf6f55392cb297cfe2de74eff73e772efccd2f0b5d842740991d243fb004cd88e1e1e61334ab6
 8117932c732fac741ab87a6f95d113c9b24f5979ccfa2e08c0de40fe2fd34c701ef22adcfd30e46df30597e1d8a00db1efd92313c35608aaddb29ad6f73a46a3  0008-ASoC-codecs-add-FourSemi-FS18xx-speaker-amplifiers.patch
 769217478ff4885f6aca610fd78ef246aa783577bd7a17c4acf50dd79e527d65d3f3f39c1cb3926024ba46199186adc2cdc3870112f18587585ea33fa7f386d0  0009-arm64-dts-qcom-sm6115-samsung-gta4l-bring-up-the-tab.patch
 cebd1c81bfa82848eadb084677d84dc2627c2c44ec83c9ea2ee046889cbef912d46ff141e757abdf93fa5451eeba16126b83fdf5af81fb3336cf1852ab66c746  0010-power-supply-qcom_qg-pull-a-drifted-count-back-to-th.patch
+5ab19a5aa22fb2dbe26ed0a977f6c27e544b7137cb11173c40fa92512d1ed6dcc3015e16b32800b59cc9c0355efa6a347ac4491fe3108c4d5cc43083aadfe361  0011-media-venus-leave-the-encoder-and-VP9-off-on-AR50_LI.patch
 "

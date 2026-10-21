@@ -25,7 +25,7 @@ writes the Odin tar to flash as AP.
 
 | Package | What it is |
 |---|---|
-| `linux-postmarketos-qcom-sm6115` | Kernel 7.2: [LinuxForGta4l/linux](https://github.com/LinuxForGta4l/linux) `gta4l-7.2` at `c91d0e9` plus 10 patches, one per driver and one for the DTS. The same series is the `gta4l-7.2-clean` branch of [limonabisi/linux-gta4l](https://github.com/limonabisi/linux-gta4l/tree/gta4l-7.2-clean). |
+| `linux-postmarketos-qcom-sm6115` | Kernel 7.2: [LinuxForGta4l/linux](https://github.com/LinuxForGta4l/linux) `gta4l-7.2` at `c91d0e9` plus 11 patches, one per driver and one for the DTS. The same series is the `gta4l-7.2-clean` branch of [limonabisi/linux-gta4l](https://github.com/limonabisi/linux-gta4l/tree/gta4l-7.2-clean). |
 | `device-samsung-gta4l` | deviceinfo, firmware import from the tablet's own partitions (read with mtools, never mounted), speaker tuning import, ALSA UCM, wake-up source rule, PAM fix for the systemd user manager, battery count kept across reboots; lighter defaults (no accessibility bus, KWallet or X11 tray bridges, 64 MB journal, Wi-Fi power saving off, weekly TRIM). |
 | `device-samsung-gta4l-sensors` | Accelerometer, light sensor and compass through the ADSP (hexagonrpcd + libssc + iio-sensor-proxy). |
 | `hexagonrpcd-gta4l` | hexagonrpcd with one patch: it also serves `sns_reg_version` next to the sensor registry. |
@@ -42,7 +42,7 @@ charging (in U-Boot, with the percentage), Bluetooth RFCOMM/BNEP, sleep (s2idle)
 over USB, U-Boot.
 
 Known problems:
-- Venus encoding crashes ffmpeg and can take the tablet down; decoding works.
+- Venus encoding and VP9 decoding are off: the Samsung firmware (6.0.49) predates the fixes of 6.0.55. H.264 and HEVC decoding work.
 - USB OTG and charging at the same time is not possible: the PMI632 has no
   USB PD PHY, so a hub cannot swap the power role.
 - Headphones: only the left channel plays; the right channel's data does not
